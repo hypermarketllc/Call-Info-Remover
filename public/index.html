@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Redaction System</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="upload-card">
+            <h1>Call Info Remover</h1>
+            <p class="subtitle">Upload audio files to automatically redact sensitive information</p>
+            
+            <div id="drop-area" class="drop-area">
+                <div class="drop-message">Drag and drop files here or click to select</div>
+            </div>
+            
+            <div style="margin-bottom: 15px; text-align: center;">
+                <input type="file" id="file-input" accept="audio/*" />
+            </div>
+            
+            <div class="button-group">
+                <button id="clear-btn" class="btn btn-secondary">Clear</button>
+                <button id="upload-btn" class="btn btn-primary" disabled>Upload</button>
+            </div>
+            
+            <div id="file-preview" class="file-preview"></div>
+            <div id="upload-progress" class="upload-progress hidden">
+                <div class="progress-bar">
+                    <div id="progress-fill" class="progress-fill"></div>
+                </div>
+                <p id="progress-text">Uploading...</p>
+            </div>
+        </div>
+
+        <div class="recordings-card hidden" id="recordings-card">
+            <h2>Processed Recordings</h2>
+            <div id="recordings-list" class="recordings-list">
+                <!-- Recordings will be listed here -->
+            </div>
+        </div>
+
+        <div class="logs-card hidden" id="logs-card">
+            <div class="logs-header">
+                <h2>Processing Logs</h2>
+                <div class="logs-controls">
+                    <select id="log-filter">
+                        <option value="all">All Logs</option>
+                        <option value="api">API</option>
+                        <option value="redaction">Redaction</option>
+                        <option value="transcription">Transcription</option>
+                        <option value="audio">Audio Processing</option>
+                        <option value="system">System</option>
+                    </select>
+                    <button id="refresh-logs" class="btn btn-secondary">Refresh</button>
+                    <button id="clear-logs" class="btn btn-secondary">Clear</button>
+                </div>
+            </div>
+            <div id="logs-container" class="logs-container">
+                <!-- Logs will be displayed here -->
+            </div>
+        </div>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>

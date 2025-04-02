@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Redaction System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, 
+                        Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+        }
+        
+        body {
+            background-color: #f8f9fe;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        
+        .card {
+            background-color: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+            padding: 30px;
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            color: #2196F3;
+            font-size: 24px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        h2 {
+            color: #333;
+            font-size: 18px;
+            margin-bottom: 15px;
+        }
+        
+        .subtitle {
+            color: #8a8a8a;
+            font-size: 16px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .upload-area {
+            border: 2px dashed #d0d7e9;
+            border-radius: 8px;
+            height: 150px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+            transition: all 0.3s;
+            cursor: pointer;
+            background-repeat: no-repeat;
+            background-position: center;
+            background-size: 50px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23d0d7e9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'%3E%3C/path%3E%3Cpolyline points='17 8 12 3 7 8'%3E%3C/polyline%3E%3Cline x1='12' y1='3' x2='12' y2='15'%3E%3C/line%3E%3C/svg%3E");
+        }
+        
+        .upload-area.highlight {
+            border-color: #2196F3;
+            background-color: rgba(33, 150, 243, 0.05);
+        }
+        
+        .upload-area.has-file {
+            border-style: solid;
+            border-color: #2196F3;
+            background-image: none;
+        }
+        
+        .timestamps-container {
+            margin-top: 20px;
+        }
+        
+        .timestamp-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+            gap: 10px;
+        }
+        
+        .timestamp-input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .btn {
+            border: none;
+            border-radius: 6px;
+            padding: 10px 20px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-block;
+            text-align: center;
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .btn-primary {
+            background-color: #2196F3;
+            color: white;
+        }
+        
+        .btn-primary:hover:not(:disabled) {
+            background-color: #1976D2;
+        }
+        
+        .btn-secondary {
+            background-color: #e0e0e0;
+            color: #5f6368;
+        }
+        
+        .btn-secondary:hover:not(:disabled) {
+            background-color: #d5d5d5;
+        }
+        
+        .btn-danger {
+            background-color: #f44336;
+            color: white;
+        }
+        
+        .btn-danger:hover:not(:disabled) {
+            background-color: #d32f2f;
+        }
+        
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+        
+        .btn-icon {
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+            justify-content: center;
+        }
+        
+        .file-info {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 10px;
+            border-radius: 6px;
+            background-color: #f8f9fe;
+        }
+        
+        .file-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 4px;
+            background-color: #e1f5fe;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #2196F3;
+            margin-right: 10px;
+        }
+        
+        .file-details {
+            flex: 1;
+        }
+        
+        .file-name {
+            font-weight: 500;
+            margin-bottom: 3px;
+        }
+        
+        .file-meta {
+            font-size: 12px;
+            color: #777;
+        }
+        
+        .audio-player {
+            width: 100%;
+            margin: 10px 0;
+        }
+        
+        .result-card {
+            display: none;
+        }
+        
+        .alert {
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+        
+        .alert-success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            border-left: 4px solid #4caf50;
+        }
+        
+        .alert-error {
+            background-color: #ffebee;
+            color: #c62828;
+            border-left: 4px solid #f44336;
+        }
+        
+        .files-list {
+            margin-top: 20px;
+        }
+        
+        .file-item {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+        }
+        
+        .file-item:hover {
+            background-color: #f5f5f5;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 2s linear infinite;
+            margin: 0 auto 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Audio Redaction System</h1>
+        <p class="subtitle">Upload audio files and add beeps at specific timestamps</p>
+        
+        <div class="card">
+            <h2>Upload Audio File</h2>
+            
+            <div id="upload-area" class="upload-area">
+                <input type="file" id="audio-file" accept="audio/*" hidden>
+                <span id="drop-text">Drag & drop an audio file here or click to browse</span>
+            </div>
+            
+            <div id="file-preview"></div>
+            
+            <div id="timestamps-container" class="timestamps-container" style="display: none;">
+                <h2>Specify Timestamps for Redaction</h2>
+                <p>Add start and end times (in seconds) where you want to add beep sounds:</p>
+                
+                <div id="timestamps-list">
+                    <div class="timestamp-item">
+                        <input type="number" class="timestamp-input start-time" step="0.1" min="0" placeholder="Start time (seconds)">
+                        <input type="number" class="timestamp-input end-time" step="0.1" min="0" placeholder="End time (seconds)">
+                        <button class="btn btn-danger btn-sm btn-icon remove-timestamp">×</button>
+                    </div>
+                </div>
+                
+                <div class="btn-group">
+                    <button id="add-timestamp" class="btn btn-secondary">Add Another Timestamp</button>
+                    <button id="process-btn" class="btn btn-primary">Process Audio</button>
+                </div>
+            </div>
+            
+            <div id="loading" class="loading">
+                <div class="spinner"></div>
+                <p>Processing your audio file...</p>
+            </div>
+        </div>
+        
+        <div id="result-card" class="card result-card">
+            <h2>Processing Results</h2>
+            
+            <div id="result-message"></div>
+            
+            <div id="audio-player-container">
+                <h3>Redacted Audio</h3>
+                <audio id="redacted-audio" class="audio-player" controls></audio>
+                
+                <div class="btn-group">
+                    <a id="download-redacted" class="btn btn-primary" download>Download Redacted Audio</a>
+                    <a id="download-original" class="btn btn-secondary" download>Download Original Audio</a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>Previously Processed Files</h2>
+            <div id="files-list" class="files-list">
+                <p>No files processed yet.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Elements
+            const uploadArea = document.getElementById('upload-area');
+            const audioFile = document.getElementById('audio-file');
+            const filePreview = document.getElementById('file-preview');
+            const timestampsContainer = document.getElementById('timestamps-container');
+            const timestampsList = document.getElementById('timestamps-list');
+            const addTimestampBtn = document.getElementById('add-timestamp');
+            const processBtn = document.getElementById('process-btn');
+            const loadingElement = document.getElementById('loading');
+            const resultCard = document.getElementById('result-card');
+            const resultMessage = document.getElementById('result-message');
+            const redactedAudio = document.getElementById('redacted-audio');
+            const downloadRedacted = document.getElementById('download-redacted');
+            const downloadOriginal = document.getElementById('download-original');
+            const filesList = document.getElementById('files-list');
+            
+            let currentFileId = null;
+            
+            // Handle click on upload area
+            uploadArea.addEventListener('click', () => {
+                audioFile.click();
+            });
+            
+            // Handle file selection
+            audioFile.addEventListener('change', handleFileSelect);
+            
+            // Handle drag and drop
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, preventDefaults, false);
+            });
+            
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            ['dragenter', 'dragover'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, highlight, false);
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, unhighlight, false);
+            });
+            
+            function highlight() {
+                uploadArea.classList.add('highlight');
+            }
+            
+            function unhighlight() {
+                uploadArea.classList.remove('highlight');
+            }
+            
+            uploadArea.addEventListener('drop', (e) => {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                
+                if (files.length > 0) {
+                    audioFile.files = files;
+                    handleFileSelect();
+                }
+            });
+            
+            // Handle file selection
+            function handleFileSelect() {
+                if (audioFile.files.length === 0) return;
+                
+                const file = audioFile.files[0];
+                
+                if (!file.type.startsWith('audio/')) {
+                    alert('Please select an audio file');
+                    return;
+                }
+                
+                // Update UI
+                uploadArea.classList.add('has-file');
+                document.getElementById('drop-text').textContent = 'File selected';
+                
+                // Show file preview
+                const fileSizeInKB = file.size / 1024;
+                let fileSize;
+                if (fileSizeInKB < 1024) {
+                    fileSize = fileSizeInKB.toFixed(1) + ' KB';
+                } else {
+                    fileSize = (fileSizeInKB / 1024).toFixed(1) + ' MB';
+                }
+                
+                filePreview.innerHTML = `
+                    <div class="file-info">
+                        <div class="file-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
+                                <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path>
+                            </svg>
+                        </div>
+                        <div class="file-details">
+                            <div class="file-name">${file.name}</div>
+                            <div class="file-meta">${fileSize} • ${file.type}</div>
+                        </div>
+                    </div>
+                `;
+                
+                // Upload the file
+                uploadFile(file);
+            }
+            
+            // Upload file to server
+            function uploadFile(file) {
+                const formData = new FormData();
+                formData.append('audio', file);
+                
+                fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.success) {
+                        currentFileId = data.fileId;
+                        timestampsContainer.style.display = 'block';
+                    } else {
+                        throw new Error(data.error || 'Unknown error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error uploading file:', error);
+                    alert('Error uploading file: ' + error.message);
+                });
+            }
+            
+            // Add timestamp button
+            addTimestampBtn.addEventListener('click', () => {
+                const newItem = document.createElement('div');
+                newItem.className = 'timestamp-item';
+                newItem.innerHTML = `
+                    <input type="number" class="timestamp-input start-time" step="0.1" min="0" placeholder="Start time (seconds)">
+                    <input type="number" class="timestamp-input end-time" step="0.1" min="0" placeholder="End time (seconds)">
+                    <button class="btn btn-danger btn-sm btn-icon remove-timestamp">×</button>
+                `;
+                
+                timestampsList.appendChild(newItem);
+                
+                // Add event listener to remove button
+                newItem.querySelector('.remove-timestamp').addEventListener('click', function() {
+                    this.parentElement.remove();
+                });
+            });
+            
+            // Add event listener to first remove button
+            document.querySelector('.remove-timestamp').addEventListener('click', function() {
+                if (timestampsList.children.length > 1) {
+                    this.parentElement.remove();
+                } else {
+                    alert('You must have at least one timestamp');
+                }
+            });
+            
+            // Process button
+            processBtn.addEventListener('click', processAudio);
+            
+            // Process audio
+            function processAudio() {
+                if (!currentFileId) {
+                    alert('Please upload an audio file first');
+                    return;
+                }
+                
+                // Collect timestamps
+                const timestamps = [];
+                const timestampItems = timestampsList.querySelectorAll('.timestamp-item');
+                
+                for (const item of timestampItems) {
+                    const startTime = parseFloat(item.querySelector('.start-time').value);
+                    const endTime = parseFloat(item.querySelector('.end-time').value);
+                    
+                    if (isNaN(startTime) || isNaN(endTime)) {
+                        alert('Please enter valid numbers for start and end times');
+                        return;
+                    }
+                    
+                    if (startTime >= endTime) {
+                        alert('End time must be greater than start time');
+                        return;
+                    }
+                    
+                    timestamps.push({
+                        start: startTime,
+                        end: endTime
+                    });
+                }
+                
+                if (timestamps.length === 0) {
+                    alert('Please add at least one timestamp');
+                    return;
+                }
+                
+                // Show loading
+                loadingElement.style.display = 'block';
+                
+                // Send redaction request
+                fetch(`/api/redact/${currentFileId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ timestamps })
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.success) {
+                        showResults(data);
+                        loadFiles(); // Refresh the files list
+                    } else {
+                        throw new Error(data.error || 'Unknown error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error processing audio:', error);
+                    alert('Error processing audio: ' + error.message);
+                })
+                .finally(() => {
+                    loadingElement.style.display = 'none';
+                });
+            }
+            
+            // Show results
+            function showResults(data) {
+                resultMessage.innerHTML = `
+                    <div class="alert alert-success">
+                        Audio processed successfully with ${data.timestampCount} redacted timestamp(s).
+                    </div>
+                `;
+                
+                // Set audio source
+                redactedAudio.src = `/api/download/redacted/${data.fileId}`;
+                
+                // Set download links
+                downloadRedacted.href = `/api/download/redacted/${data.fileId}`;
+                downloadOriginal.href = `/api/download/original/${data.fileId}`;
+                
+                // Show result card
+                resultCard.style.display = 'block';
+            }
+            
+            // Load files list
+            function loadFiles() {
+                fetch('/api/files')
+                .then(response => response.json())
+                .then(files => {
+                    if (files.length === 0) {
+                        filesList.innerHTML = '<p>No files processed yet.</p>';
+                        return;
+                    }
+                    
+                    filesList.innerHTML = '';
+                    
+                    files.forEach(file => {
+                        const fileItem = document.createElement('div');
+                        fileItem.className = 'file-item';
+                        
+                        const date = new Date(file.uploadDate);
+                        const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+                        
+                        fileItem.innerHTML = `
+                            <div class="file-name">${file.originalName}</div>
+                            <div class="file-meta">
+                                ${formattedDate} • 
+                                ${file.processed ? `${file.timestampCount} redacted timestamp(s)` : 'Not processed'}
+                            </div>
+                        `;
+                        
+                        if (file.processed) {
+                            fileItem.addEventListener('click', () => {
+                                loadFile(file.id);
+                            });
+                        }
+                        
+                        filesList.appendChild(fileItem);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error loading files:', error);
+                    filesList.innerHTML = '<p>Error loading files.</p>';
+                });
+            }
+            
+            // Load a specific file
+            function loadFile(fileId) {
+                fetch(`/api/files/${fileId}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(file => {
+                    resultMessage.innerHTML = `
+                        <div class="alert alert-success">
+                            Loaded file: ${file.originalName} (${file.timestampCount} redacted timestamp(s))
+                        </div>
+                    `;
+                    
+                    // Set audio source
+                    redactedAudio.src = `/api/download/redacted/${file.id}`;
+                    
+                    // Set download links
+                    downloadRedacted.href = `/api/download/redacted/${file.id}`;
+                    downloadOriginal.href = `/api/download/original/${file.id}`;
+                    
+                    // Show result card
+                    resultCard.style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Error loading file:', error);
+                    alert('Error loading file: ' + error.message);
+                });
+            }
+            
+            // Load files on page load
+            loadFiles();
+        });
+    </script>
+</body>
+</html>
