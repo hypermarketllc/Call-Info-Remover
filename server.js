@@ -9,8 +9,8 @@ const path = require('path');
 const cors = require('cors');
 const winston = require('winston');
 
-// Import the integrated audio processor
-const audioProcessor = require('./integrated-audio-processor');
+// Import the fixed audio processor
+const audioProcessor = require('./audio-processor-fix');
 
 // Create a structured logging system
 const logs = [];
@@ -589,22 +589,34 @@ function createRedactedAudioWithFFmpeg(originalPath, sensitiveSections, outputPa
 }
 
 /**
- * Main function to create a redacted audio file with beeps over sensitive information
- * Uses the integrated audio processor with automatic MP3 to WAV conversion
+ * Main function to create a redacted audio file with configurable redaction method
+ * Uses the integrated audio processor with automatic MP3 to WAV conversion and compression
  */
-async function createRedactedAudio(originalPath, sensitiveSections, outputPath) {
+async function createRedactedAudio(originalPath, sensitiveSections, outputPath, options = {}) {
   return new Promise(async (resolve, reject) => {
+    // Default options
+    const config = {
+      redactionMethod: 'beep', // 'beep' or 'mute'
+      beepVolume: 0.2,         // Lower volume (0.0-1.0)
+      ...options
+    };
+    
     addLog(LOG_LEVELS.INFO, 'audio', 'Starting audio redaction process...', {
       originalPath,
       outputPath,
-      sectionsToRedact: sensitiveSections.length
+      sectionsToRedact: sensitiveSections.length,
+      redactionMethod: config.redactionMethod,
+      beepVolume: config.redactionMethod === 'beep' ? config.beepVolume : 'N/A',
+      audioVolume: config.audioVolume
     });
     
     try {
-      // Use the integrated audio processor
-      const result = await audioProcessor.processAudio(originalPath, sensitiveSections, outputPath);
+      // Use the integrated audio processor with options
+      const result = await audioProcessor.processAudio(originalPath, sensitiveSections, outputPath, config);
       
-      if (result.converted) {
+      if (result.compressed) {
+        addLog(LOG_LEVELS.SUCCESS, 'audio', `Audio file processed and compressed to match original size`);
+      } else if (result.converted) {
         addLog(LOG_LEVELS.SUCCESS, 'audio', `Audio file converted from ${path.extname(originalPath)} to ${result.format} and processed successfully`);
       } else if (result.fallback) {
         addLog(LOG_LEVELS.WARNING, 'audio', `Direct audio processing failed, using fallback HTML player approach`, {
@@ -639,6 +651,17 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
       addLog(LOG_LEVELS.ERROR, 'system', 'Error: No file uploaded');
       return res.status(400).json({ error: 'No audio file uploaded' });
     }
+
+    // Get redaction options from request
+    const redactionMethod = req.body.redactionMethod || 'beep';
+    const beepVolume = parseFloat(req.body.beepVolume) || 0.2;
+    const audioVolume = parseFloat(req.body.audioVolume) || 1.0;
+    
+    addLog(LOG_LEVELS.INFO, 'system', 'Redaction options received', {
+      redactionMethod,
+      beepVolume: beepVolume,
+      audioVolume: audioVolume
+    });
 
     const originalFilePath = req.file.path;
     const fileName = path.basename(originalFilePath);
@@ -729,8 +752,12 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
     addLog(LOG_LEVELS.INFO, 'audio', `Processing audio with ${sensitiveSections.length} sensitive sections`);
     
     try {
-      addLog(LOG_LEVELS.INFO, 'audio', 'Applying beep sounds to sensitive sections...');
-      await createRedactedAudio(originalFilePath, sensitiveSections, redactedAudioPath);
+      addLog(LOG_LEVELS.INFO, 'audio', `Applying ${redactionMethod === 'beep' ? 'beep sounds' : 'muting'} to sensitive sections...`);
+      await createRedactedAudio(originalFilePath, sensitiveSections, redactedAudioPath, {
+        redactionMethod,
+        beepVolume,
+        audioVolume
+      });
       
       // Verify the redacted file exists and is different from the original
       if (!fs.existsSync(redactedAudioPath)) {

@@ -126,6 +126,34 @@ document.addEventListener('DOMContentLoaded', function() {
         dropArea.classList.remove('has-file');
     });
     
+    // Redaction options handling
+    const redactionMethodRadios = document.querySelectorAll('input[name="redaction-method"]');
+    const beepVolumeSlider = document.getElementById('beep-volume');
+    const volumeValueDisplay = document.getElementById('volume-value');
+    const beepVolumeContainer = document.getElementById('beep-volume-container');
+    const audioVolumeSlider = document.getElementById('audio-volume');
+    const audioVolumeValueDisplay = document.getElementById('audio-volume-value');
+    
+    // Update volume displays when sliders change
+    beepVolumeSlider.addEventListener('input', () => {
+        volumeValueDisplay.textContent = `${beepVolumeSlider.value}%`;
+    });
+    
+    audioVolumeSlider.addEventListener('input', () => {
+        audioVolumeValueDisplay.textContent = `${audioVolumeSlider.value}%`;
+    });
+    
+    // Show/hide volume slider based on redaction method
+    redactionMethodRadios.forEach(radio => {
+        radio.addEventListener('change', () => {
+            if (radio.value === 'beep') {
+                beepVolumeContainer.style.display = 'block';
+            } else {
+                beepVolumeContainer.style.display = 'none';
+            }
+        });
+    });
+    
     // Upload file
     uploadBtn.addEventListener('click', async () => {
         if (!selectedFile) {
@@ -137,9 +165,17 @@ document.addEventListener('DOMContentLoaded', function() {
         progressFill.style.width = '0%';
         progressText.textContent = 'Preparing upload...';
         
+        // Get redaction options
+        const redactionMethod = document.querySelector('input[name="redaction-method"]:checked').value;
+        const beepVolume = parseFloat(beepVolumeSlider.value) / 100; // Convert percentage to decimal (0.0-1.0)
+        const audioVolume = parseFloat(audioVolumeSlider.value) / 100; // Convert percentage to decimal
+        
         // Create form data
         const formData = new FormData();
         formData.append('audio', selectedFile);
+        formData.append('redactionMethod', redactionMethod);
+        formData.append('beepVolume', beepVolume);
+        formData.append('audioVolume', audioVolume);
         
         try {
             // Start upload with progress monitoring

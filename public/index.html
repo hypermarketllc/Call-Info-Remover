@@ -20,6 +20,33 @@
                 <input type="file" id="file-input" accept="audio/*" />
             </div>
             
+            <div class="redaction-options">
+                <h3>Redaction Options</h3>
+                <div class="option-group">
+                    <label>Redaction Method:</label>
+                    <div class="radio-group">
+                        <label>
+                            <input type="radio" name="redaction-method" value="beep" checked> 
+                            Beep Sound
+                        </label>
+                        <label>
+                            <input type="radio" name="redaction-method" value="mute"> 
+                            Mute (Silence)
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="option-group" id="beep-volume-container">
+                    <label for="beep-volume">Beep Volume: <span id="volume-value">20%</span></label>
+                    <input type="range" id="beep-volume" min="1" max="100" value="20" class="slider">
+                </div>
+                
+                <div class="option-group">
+                    <label for="audio-volume">Audio Volume: <span id="audio-volume-value">100%</span></label>
+                    <input type="range" id="audio-volume" min="50" max="300" value="100" class="slider">
+                </div>
+            </div>
+            
             <div class="button-group">
                 <button id="clear-btn" class="btn btn-secondary">Clear</button>
                 <button id="upload-btn" class="btn btn-primary" disabled>Upload</button>

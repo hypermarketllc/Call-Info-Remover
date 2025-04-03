@@ -7,6 +7,8 @@ const NodeWav = require('node-wav');
 const ffmpegStatic = require('ffmpeg-static');
 const { spawn } = require('child_process');
 const winston = require('winston');
+const { execSync } = require('child_process');
+const os = require('os');
 
 // Configure logger
 const logger = winston.createLogger({
@@ -273,15 +275,23 @@ async function verifyWavFile(filePath) {
 }
 
 /**
- * Process WAV file with beep sounds at specified timestamps
+ * Process WAV file with configurable redaction method (beep or mute) at specified timestamps
  * @param {string} inputPath - Path to input WAV file
  * @param {Array} timestamps - Array of {start, end} objects
  * @param {string} outputPath - Path for output file
+ * @param {Object} options - Configuration options
  * @returns {Promise<string>} - Path to processed file
  */
-async function processWavFile(inputPath, timestamps, outputPath) {
+async function processWavFile(inputPath, timestamps, outputPath, options = {}) {
   return new Promise((resolve, reject) => {
     try {
+      // Default options
+      const config = {
+        redactionMethod: 'beep', // 'beep' or 'mute'
+        beepVolume: 0.2,         // Lower volume (0.0-1.0)
+        ...options
+      };
+      
       // Read and decode the WAV file
       const wavBuffer = fs.readFileSync(inputPath);
       let wavData;
@@ -299,33 +309,49 @@ async function processWavFile(inputPath, timestamps, outputPath) {
       const numChannels = audioData.length;
       
       logger.info(`Processing WAV: ${sampleRate}Hz, ${numChannels} channels`);
+      logger.info(`Redaction method: ${config.redactionMethod}${config.redactionMethod === 'beep' ? `, volume: ${config.beepVolume}` : ''}`);
       
-      // For each timestamp, replace with beep
+      // For each timestamp, apply the selected redaction method
       timestamps.forEach(timestamp => {
         const startSample = Math.floor(timestamp.start * sampleRate);
         const endSample = Math.floor(timestamp.end * sampleRate);
         
-        logger.info(`Adding beep from ${timestamp.start}s to ${timestamp.end}s (samples ${startSample}-${endSample})`);
-        
-        // Generate beep tone (1kHz sine wave)
-        for (let i = startSample; i < endSample; i++) {
-          if (i < audioData[0].length) {
-            const t = (i - startSample) / sampleRate;
-            const sample = 0.5 * Math.sin(2 * Math.PI * 1000 * t);
-            
-            // Apply to all channels
-            for (let channel = 0; channel < numChannels; channel++) {
-              audioData[channel][i] = sample;
+        if (config.redactionMethod === 'mute') {
+          logger.info(`Muting audio from ${timestamp.start}s to ${timestamp.end}s (samples ${startSample}-${endSample})`);
+          
+          // Mute the sensitive section (set samples to zero)
+          for (let i = startSample; i < endSample; i++) {
+            if (i < audioData[0].length) {
+              // Set sample to zero (silence) for all channels
+              for (let channel = 0; channel < numChannels; channel++) {
+                audioData[channel][i] = 0;
+              }
+            }
+          }
+        } else {
+          logger.info(`Adding beep (volume: ${config.beepVolume}) from ${timestamp.start}s to ${timestamp.end}s (samples ${startSample}-${endSample})`);
+          
+          // Generate beep tone with configurable volume (1kHz sine wave)
+          for (let i = startSample; i < endSample; i++) {
+            if (i < audioData[0].length) {
+              const t = (i - startSample) / sampleRate;
+              // Apply volume adjustment to beep
+              const sample = config.beepVolume * Math.sin(2 * Math.PI * 1000 * t);
+              
+              // Apply to all channels
+              for (let channel = 0; channel < numChannels; channel++) {
+                audioData[channel][i] = sample;
+              }
             }
           }
         }
       });
       
-      // Encode back to WAV
+      // Encode back to WAV with more efficient settings (16-bit instead of 32-bit float)
       const encoded = NodeWav.encode(audioData, {
         sampleRate: sampleRate,
-        float: true,
-        bitDepth: 32
+        float: false,
+        bitDepth: 16
       });
       
       // Ensure output directory exists
@@ -352,42 +378,237 @@ async function processWavFile(inputPath, timestamps, outputPath) {
 }
 
 /**
- * Main function to process audio file with automatic MP3 to WAV conversion
+ * Compress audio file to match target size using FFmpeg
+ * @param {string} inputPath - Path to input audio file
+ * @param {string} outputPath - Path for output file
+ * @param {number} targetSize - Target file size in bytes
+ * @returns {Promise<string>} - Path to compressed file
+ */
+async function compressAudioFile(inputPath, outputPath, targetSize) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      logger.info(`Compressing audio file to match target size: ${(targetSize / 1024 / 1024).toFixed(2)} MB`);
+      
+      // Start with medium quality
+      let bitrate = 128;
+      let attempt = 0;
+      const maxAttempts = 3;
+      
+      // Try different bitrates until we get close to target size or reach max attempts
+      while (attempt < maxAttempts) {
+        attempt++;
+        logger.info(`Compression attempt ${attempt}/${maxAttempts} with bitrate: ${bitrate}kbps`);
+        
+        try {
+          await compressWithBitrate(inputPath, outputPath, bitrate);
+          
+          // Check if file exists and get its size
+          if (fs.existsSync(outputPath)) {
+            const compressedStats = fs.statSync(outputPath);
+            const compressedSize = compressedStats.size;
+            
+            logger.info(`Compressed file size: ${(compressedSize / 1024 / 1024).toFixed(2)} MB`);
+            
+            // If we're within 10% of target size, we're done
+            if (Math.abs(compressedSize - targetSize) / targetSize < 0.1) {
+              logger.info(`Compression successful, file size is within 10% of target`);
+              return resolve(outputPath);
+            }
+            
+            // Adjust bitrate based on result
+            const ratio = targetSize / compressedSize;
+            const newBitrate = Math.floor(bitrate * ratio);
+            
+            logger.info(`Adjusting bitrate: ${bitrate}kbps -> ${newBitrate}kbps (ratio: ${ratio.toFixed(2)})`);
+            
+            // Keep bitrate in reasonable range
+            bitrate = Math.max(64, Math.min(320, newBitrate));
+          } else {
+            logger.error(`Compressed file not created: ${outputPath}`);
+            throw new Error('Compressed file not created');
+          }
+        } catch (error) {
+          logger.error(`Compression attempt ${attempt} failed: ${error.message}`);
+          
+          // If this is the last attempt, try a more conservative approach
+          if (attempt === maxAttempts - 1) {
+            logger.warn(`Trying final compression with conservative bitrate: 96kbps`);
+            bitrate = 96;
+          }
+        }
+      }
+      
+      // If we've reached max attempts, use the last result
+      if (fs.existsSync(outputPath)) {
+        logger.warn(`Could not achieve target size after ${maxAttempts} attempts, using best effort result`);
+        resolve(outputPath);
+      } else {
+        reject(new Error(`Failed to compress audio file after ${maxAttempts} attempts`));
+      }
+    } catch (error) {
+      logger.error(`Error in compressAudioFile: ${error.message}`);
+      reject(error);
+    }
+  });
+}
+
+/**
+ * Compress audio file with specific bitrate
+ * @param {string} inputPath - Path to input audio file
+ * @param {string} outputPath - Path for output file
+ * @param {number} bitrate - Target bitrate in kbps
+ * @returns {Promise<string>} - Path to compressed file
+ */
+async function compressWithBitrate(inputPath, outputPath, bitrate) {
+  return new Promise((resolve, reject) => {
+    // Use FFmpeg to compress the audio
+    const ffmpegProcess = spawn(ffmpegStatic, [
+      '-i', inputPath,           // Input file
+      '-c:a', 'libmp3lame',      // MP3 codec
+      '-b:a', `${bitrate}k`,     // Bitrate
+      '-y',                      // Overwrite output file
+      outputPath                 // Output file
+    ]);
+    
+    let errorOutput = '';
+    
+    ffmpegProcess.stderr.on('data', (data) => {
+      // FFmpeg outputs progress information to stderr
+      const message = data.toString();
+      errorOutput += message;
+      
+      // Log progress but avoid excessive logging
+      if (message.includes('time=')) {
+        const timeMatch = message.match(/time=([0-9:.]+)/);
+        if (timeMatch) {
+          logger.debug(`Compression progress: ${timeMatch[1]}`);
+        }
+      }
+    });
+    
+    ffmpegProcess.on('close', (code) => {
+      if (code === 0) {
+        // Compression successful
+        logger.info(`Compression with bitrate ${bitrate}kbps completed successfully`);
+        resolve(outputPath);
+      } else {
+        // Compression failed
+        logger.error(`FFmpeg compression exited with code ${code}`);
+        logger.error(`Error output: ${errorOutput}`);
+        reject(new Error(`FFmpeg compression exited with code ${code}`));
+      }
+    });
+    
+    ffmpegProcess.on('error', (err) => {
+      logger.error(`Failed to start FFmpeg compression process: ${err.message}`);
+      reject(err);
+    });
+    
+    // Set a timeout to prevent hanging
+    const timeout = setTimeout(() => {
+      ffmpegProcess.kill();
+      reject(new Error('FFmpeg compression timed out after 5 minutes'));
+    }, 5 * 60 * 1000); // 5 minutes
+    
+    ffmpegProcess.on('close', () => {
+      clearTimeout(timeout);
+    });
+  });
+}
+
+/**
+ * Main function to process audio file with automatic MP3 to WAV conversion and compression
  * @param {string} inputPath - Path to input audio file
  * @param {Array} timestamps - Array of {start, end} objects
  * @param {string} outputPath - Path for output file
+ * @param {Object} options - Configuration options
  * @returns {Promise<{path: string, format: string, converted: boolean}>} - Processing result
  */
-async function processAudio(inputPath, timestamps, outputPath) {
+async function processAudio(inputPath, timestamps, outputPath, options = {}) {
   return new Promise(async (resolve, reject) => {
     try {
+      // Default options
+      const config = {
+        redactionMethod: 'beep', // 'beep' or 'mute'
+        beepVolume: 0.2,         // Lower volume (0.0-1.0)
+        ...options
+      };
+      
       // Ensure input file exists
       if (!fs.existsSync(inputPath)) {
         return reject(new Error(`Input file does not exist: ${inputPath}`));
       }
       
+      // Get original file size for compression target
+      const originalStats = fs.statSync(inputPath);
+      const originalSize = originalStats.size;
+      logger.info(`Original file size: ${(originalSize / 1024 / 1024).toFixed(2)} MB`);
+      
       // Check file extension
       const ext = path.extname(inputPath).toLowerCase();
+      const outputExt = path.extname(outputPath).toLowerCase();
+      
+      // Check available disk space before proceeding
+      try {
+        const diskInfo = checkDiskSpace(path.dirname(outputPath));
+        // Estimate required space (original size * 3 for temporary files)
+        const requiredSpace = originalSize * 3;
+        
+        if (diskInfo.available < requiredSpace) {
+          return reject(new Error(`Insufficient disk space. Required: ${formatSize(requiredSpace)}, Available: ${formatSize(diskInfo.available)}`));
+        }
+        
+        logger.info(`Disk space check passed. Available: ${formatSize(diskInfo.available)}, Required: ${formatSize(requiredSpace)}`);
+      } catch (diskError) {
+        logger.warn(`Could not check disk space: ${diskError.message}. Proceeding anyway.`);
+      }
+      
+      // Create temporary paths for intermediate files
+      const tempDir = path.join(path.dirname(outputPath), 'temp');
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+      
+      const tempWavPath = path.join(tempDir, `temp_${Date.now()}.wav`);
+      const tempProcessedPath = path.join(tempDir, `temp_processed_${Date.now()}.wav`);
+      
+      // Respect the requested output format
+      const finalOutputPath = outputPath;
+      const finalOutputExt = path.extname(finalOutputPath).toLowerCase();
       
       // Process based on file type
       if (ext === '.wav') {
         // Process WAV file directly
         logger.info(`Processing WAV file directly: ${inputPath}`);
-        const result = await processWavFile(inputPath, timestamps, outputPath);
-        resolve({
-          path: result,
-          format: 'wav',
-          converted: false
-        });
+        
+        try {
+          // Process the WAV file
+          await processWavFile(inputPath, timestamps, tempProcessedPath, config);
+          
+          // Compress to match original size
+          logger.info(`Compressing processed WAV file to match original size`);
+          const compressedPath = await compressAudioFile(tempProcessedPath, finalOutputPath, originalSize);
+          
+          // Clean up temporary files
+          try {
+            if (fs.existsSync(tempProcessedPath)) fs.unlinkSync(tempProcessedPath);
+          } catch (cleanupError) {
+            logger.warn(`Failed to remove temporary file: ${cleanupError.message}`);
+          }
+          
+          resolve({
+            path: compressedPath,
+            format: 'mp3',
+            converted: true,
+            compressed: true
+          });
+        } catch (processingError) {
+          logger.error(`WAV processing failed: ${processingError.message}`);
+          throw processingError;
+        }
       } else if (ext === '.mp3') {
         // Convert MP3 to WAV first, then process
         logger.info(`MP3 file detected, converting to WAV first: ${inputPath}`);
-        
-        // Create temporary WAV file path
-        const tempWavPath = path.join(
-          path.dirname(inputPath),
-          `temp_${path.basename(inputPath, '.mp3')}.wav`
-        );
         
         try {
           // Convert MP3 to WAV
@@ -400,23 +621,28 @@ async function processAudio(inputPath, timestamps, outputPath) {
           
           // Process the WAV file
           logger.info(`Processing converted WAV file: ${tempWavPath}`);
-          const processedPath = await processWavFile(tempWavPath, timestamps, outputPath);
+          await processWavFile(tempWavPath, timestamps, tempProcessedPath, config);
           
-          // Clean up temporary file
+          // Compress to match original size
+          logger.info(`Compressing processed WAV file to match original size`);
+          const compressedPath = await compressAudioFile(tempProcessedPath, finalOutputPath, originalSize);
+          
+          // Clean up temporary files
           try {
-            fs.unlinkSync(tempWavPath);
-            logger.debug(`Temporary WAV file removed: ${tempWavPath}`);
+            if (fs.existsSync(tempWavPath)) fs.unlinkSync(tempWavPath);
+            if (fs.existsSync(tempProcessedPath)) fs.unlinkSync(tempProcessedPath);
           } catch (cleanupError) {
-            logger.warn(`Failed to remove temporary WAV file: ${cleanupError.message}`);
+            logger.warn(`Failed to remove temporary files: ${cleanupError.message}`);
           }
           
           resolve({
-            path: processedPath,
-            format: 'wav',
-            converted: true
+            path: compressedPath,
+            format: 'mp3',
+            converted: true,
+            compressed: true
           });
         } catch (conversionError) {
-          logger.error(`MP3 to WAV conversion failed: ${conversionError.message}`);
+          logger.error(`MP3 processing failed: ${conversionError.message}`);
           
           // Fallback to HTML player approach
           logger.info('Falling back to HTML player approach for MP3 file');
@@ -424,9 +650,9 @@ async function processAudio(inputPath, timestamps, outputPath) {
           // Copy the original MP3 to the output path
           fs.copyFileSync(inputPath, outputPath);
           
-          // Create a WAV beep track
+          // Create a WAV beep track with lower volume
           const beepTrackPath = outputPath + '.beeps.wav';
-          await createBeepTrack(timestamps, beepTrackPath);
+          await createBeepTrack(timestamps, beepTrackPath, { volume: config.beepVolume });
           
           // Create an HTML player
           const htmlPlayerPath = outputPath + '.player.html';
@@ -455,18 +681,79 @@ async function processAudio(inputPath, timestamps, outputPath) {
     } catch (error) {
       logger.error(`Error in processAudio: ${error.message}`);
       
-      // Fallback to copying the original file
+      // Instead of copying the original file (which would contain sensitive info),
+      // create a silent file of the same duration as a secure fallback
       try {
-        logger.warn('Processing failed, copying original file as fallback');
-        fs.copyFileSync(inputPath, outputPath);
+        logger.warn('Processing failed, creating silent audio file as secure fallback');
+        
+        // Get the duration of the original file using ffmpeg
+        const getDuration = async () => {
+          return new Promise((resolve, reject) => {
+            const ffmpegProcess = spawn(ffmpegStatic, [
+              '-i', inputPath,
+              '-f', 'null',
+              '-'
+            ]);
+            
+            let output = '';
+            ffmpegProcess.stderr.on('data', (data) => {
+              output += data.toString();
+            });
+            
+            ffmpegProcess.on('close', (code) => {
+              if (code !== 0) {
+                return resolve(60); // Default to 60 seconds if we can't determine
+              }
+              
+              // Parse duration from ffmpeg output
+              const durationMatch = output.match(/Duration: (\d{2}):(\d{2}):(\d{2}.\d{2})/);
+              if (durationMatch) {
+                const hours = parseInt(durationMatch[1]);
+                const minutes = parseInt(durationMatch[2]);
+                const seconds = parseFloat(durationMatch[3]);
+                const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+                resolve(totalSeconds);
+              } else {
+                resolve(60); // Default to 60 seconds if parsing fails
+              }
+            });
+          });
+        };
+        
+        const duration = await getDuration();
+        logger.info(`Creating silent audio file with duration: ${duration} seconds`);
+        
+        // Create a silent audio file
+        const silentProcess = spawn(ffmpegStatic, [
+          '-f', 'lavfi',
+          '-i', 'anullsrc=r=44100:cl=stereo',
+          '-t', duration.toString(),
+          '-c:a', 'libmp3lame',
+          '-b:a', '128k',
+          '-y',
+          outputPath
+        ]);
+        
+        await new Promise((resolve, reject) => {
+          silentProcess.on('close', (code) => {
+            if (code === 0) {
+              resolve();
+            } else {
+              reject(new Error(`Failed to create silent audio file, exit code: ${code}`));
+            }
+          });
+        });
+        
         resolve({
           path: outputPath,
-          format: path.extname(inputPath).substring(1),
+          format: 'mp3',
           converted: false,
+          silent: true,
           error: error.message
         });
-      } catch (copyError) {
-        reject(new Error(`Failed to process audio and fallback copy also failed: ${copyError.message}`));
+      } catch (fallbackError) {
+        logger.error(`Failed to create silent fallback file: ${fallbackError.message}`);
+        reject(new Error(`Audio processing failed and secure fallback also failed: ${error.message}. Fallback error: ${fallbackError.message}`));
       }
     }
   });
@@ -501,318 +788,4 @@ async function createBeepTrack(timestamps, outputPath) {
         const startSample = Math.floor(timestamp.start * sampleRate);
         const endSample = Math.floor(timestamp.end * sampleRate);
         
-        // Generate beep tone (1kHz sine wave)
-        for (let i = startSample; i < endSample && i < numSamples; i++) {
-          const t = (i - startSample) / sampleRate;
-          const sample = 0.7 * Math.sin(2 * Math.PI * 1000 * t); // Slightly louder beep (0.7)
-          
-          // Apply to both channels
-          audioData[0][i] = sample;
-          audioData[1][i] = sample;
-        }
-      });
-      
-      // Encode to WAV
-      const encoded = NodeWav.encode(audioData, {
-        sampleRate: sampleRate,
-        float: true,
-        bitDepth: 32
-      });
-      
-      // Ensure output directory exists
-      const outputDir = path.dirname(outputPath);
-      if (!fs.existsSync(outputDir)) {
-        fs.mkdirSync(outputDir, { recursive: true });
-      }
-      
-      // Write to file
-      fs.writeFileSync(outputPath, encoded);
-      
-      logger.info(`Beep track created at ${outputPath}`);
-      resolve(outputPath);
-    } catch (error) {
-      logger.error(`Error creating beep track: ${error.message}`);
-      reject(error);
-    }
-  });
-}
-
-/**
- * Create an HTML player that can play the original MP3 and beep track simultaneously
- * @param {string} mp3Filename - The MP3 filename
- * @param {string} beepFilename - The beep track filename
- * @param {Array} timestamps - The timestamps for visualization
- * @param {string} outputPath - Path to save the HTML file
- * @returns {string} - Path to the HTML player
- */
-function createHtmlPlayer(mp3Filename, beepFilename, timestamps, outputPath) {
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audio Redaction Player</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }
-        h1 {
-            color: #2196F3;
-            text-align: center;
-        }
-        .player-container {
-            background-color: white;
-            border-radius: 8px;
-            padding: 20px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-        }
-        .audio-players {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            margin-bottom: 20px;
-        }
-        .controls {
-            display: flex;
-            justify-content: center;
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-        button {
-            background-color: #2196F3;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            padding: 10px 15px;
-            cursor: pointer;
-            font-size: 16px;
-        }
-        button:hover {
-            background-color: #1976D2;
-        }
-        button:disabled {
-            background-color: #ccc;
-            cursor: not-allowed;
-        }
-        .timeline {
-            height: 40px;
-            background-color: #f0f0f0;
-            position: relative;
-            border-radius: 4px;
-            margin-bottom: 20px;
-            overflow: hidden;
-        }
-        .progress {
-            height: 100%;
-            background-color: #bbdefb;
-            width: 0%;
-            transition: width 0.1s;
-        }
-        .timestamp {
-            position: absolute;
-            height: 100%;
-            background-color: rgba(244, 67, 54, 0.3);
-            border-left: 1px solid #e53935;
-            border-right: 1px solid #e53935;
-        }
-        .instruction {
-            background-color: #e1f5fe;
-            padding: 15px;
-            border-radius: 4px;
-            margin-bottom: 20px;
-            border-left: 4px solid #03a9f4;
-        }
-        .timestamps-list {
-            background-color: #f5f5f5;
-            padding: 15px;
-            border-radius: 4px;
-            max-height: 200px;
-            overflow-y: auto;
-        }
-        .timestamp-item {
-            padding: 5px 0;
-            border-bottom: 1px solid #ddd;
-        }
-    </style>
-</head>
-<body>
-    <h1>Audio Redaction Player</h1>
-    
-    <div class="instruction">
-        <h3>How to Use</h3>
-        <p>This player lets you hear the original audio with beep sounds overlaid at sensitive information timestamps.</p>
-        <ol>
-            <li>Click "Play Both" to hear the original audio with beeps</li>
-            <li>The red sections in the timeline show where sensitive information has been redacted</li>
-            <li>You can also play just the original or just the beep track separately</li>
-        </ol>
-    </div>
-    
-    <div class="player-container">
-        <div class="audio-players">
-            <div>
-                <h3>Original Audio</h3>
-                <audio id="original-audio" src="${mp3Filename}" preload="auto"></audio>
-            </div>
-            <div>
-                <h3>Beep Track</h3>
-                <audio id="beep-audio" src="${beepFilename}" preload="auto"></audio>
-            </div>
-        </div>
-        
-        <div class="timeline" id="timeline">
-            <div class="progress" id="progress"></div>
-            ${timestamps.map((t, i) => `
-                <div class="timestamp" style="left: 0%; width: 0%;" 
-                    data-start="${t.start}" data-end="${t.end}" id="timestamp-${i}"></div>
-            `).join('')}
-        </div>
-        
-        <div class="controls">
-            <button id="play-both">Play Both</button>
-            <button id="play-original">Play Original</button>
-            <button id="play-beeps">Play Beeps</button>
-            <button id="stop">Stop</button>
-        </div>
-        
-        <h3>Redacted Timestamps</h3>
-        <div class="timestamps-list">
-            ${timestamps.map((t, i) => `
-                <div class="timestamp-item">
-                    Timestamp ${i+1}: ${t.start.toFixed(2)}s - ${t.end.toFixed(2)}s 
-                    (Duration: ${(t.end - t.start).toFixed(2)}s)
-                </div>
-            `).join('')}
-        </div>
-    </div>
-    
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const originalAudio = document.getElementById('original-audio');
-            const beepAudio = document.getElementById('beep-audio');
-            const playBothBtn = document.getElementById('play-both');
-            const playOriginalBtn = document.getElementById('play-original');
-            const playBeepsBtn = document.getElementById('play-beeps');
-            const stopBtn = document.getElementById('stop');
-            const progress = document.getElementById('progress');
-            const timeline = document.getElementById('timeline');
-            
-            // Set up timeline markers
-            const duration = ${Math.max(...timestamps.map(t => t.end)) + 5}; // Add 5 seconds buffer
-            originalAudio.onloadedmetadata = function() {
-                const audioDuration = originalAudio.duration;
-                
-                // Position the timestamp markers
-                const timestamps = document.querySelectorAll('.timestamp');
-                timestamps.forEach(ts => {
-                    const start = parseFloat(ts.dataset.start);
-                    const end = parseFloat(ts.dataset.end);
-                    ts.style.left = (start / audioDuration * 100) + '%';
-                    ts.style.width = ((end - start) / audioDuration * 100) + '%';
-                });
-            };
-            
-            // Update progress bar
-            originalAudio.ontimeupdate = function() {
-                const percentage = (originalAudio.currentTime / originalAudio.duration) * 100;
-                progress.style.width = percentage + '%';
-            };
-            
-            // Play both audio elements in sync
-            playBothBtn.addEventListener('click', function() {
-                beepAudio.currentTime = originalAudio.currentTime;
-                originalAudio.play();
-                beepAudio.play();
-                
-                playBothBtn.disabled = true;
-                playOriginalBtn.disabled = true;
-                playBeepsBtn.disabled = true;
-                stopBtn.disabled = false;
-            });
-            
-            // Play just the original
-            playOriginalBtn.addEventListener('click', function() {
-                originalAudio.play();
-                
-                playBothBtn.disabled = true;
-                playOriginalBtn.disabled = true;
-                playBeepsBtn.disabled = true;
-                stopBtn.disabled = false;
-            });
-            
-            // Play just the beeps
-            playBeepsBtn.addEventListener('click', function() {
-                beepAudio.play();
-                
-                playBothBtn.disabled = true;
-                playOriginalBtn.disabled = true;
-                playBeepsBtn.disabled = true;
-                stopBtn.disabled = false;
-            });
-            
-            // Stop all audio
-            stopBtn.addEventListener('click', function() {
-                originalAudio.pause();
-                beepAudio.pause();
-                originalAudio.currentTime = 0;
-                beepAudio.currentTime = 0;
-                
-                playBothBtn.disabled = false;
-                playOriginalBtn.disabled = false;
-                playBeepsBtn.disabled = false;
-                stopBtn.disabled = true;
-            });
-            
-            // When one audio ends, stop the other
-            originalAudio.onended = beepAudio.onended = function() {
-                originalAudio.pause();
-                beepAudio.pause();
-                originalAudio.currentTime = 0;
-                beepAudio.currentTime = 0;
-                
-                playBothBtn.disabled = false;
-                playOriginalBtn.disabled = false;
-                playBeepsBtn.disabled = false;
-                stopBtn.disabled = true;
-            };
-            
-            // Click on timeline to seek
-            timeline.addEventListener('click', function(e) {
-                const percent = e.offsetX / timeline.offsetWidth;
-                const time = percent * originalAudio.duration;
-                originalAudio.currentTime = time;
-                beepAudio.currentTime = time;
-            });
-            
-            // Initially disable stop button
-            stopBtn.disabled = true;
-        });
-    </script>
-</body>
-</html>`;
-
-  // Ensure output directory exists
-  const outputDir = path.dirname(outputPath);
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
-  }
-
-  fs.writeFileSync(outputPath, html);
-  logger.info(`HTML player created at ${outputPath}`);
-  return outputPath;
-}
-
-// Export the module functions
-module.exports = {
-  processAudio,
-  convertMP3ToWAV,
-  verifyWavFile,
-  processWavFile,
-  createBeepTrack,
-  createHtmlPlayer
-};
+        // Generate beep tone (1kHz sine
