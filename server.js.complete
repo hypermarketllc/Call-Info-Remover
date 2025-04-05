@@ -567,133 +567,6 @@ app.post('/api/settings/deepgram-key', express.json(), (req, res) => {
   }
 });
 
-// In-memory job queue for processing
-if (!global.processingJobs) {
-  global.processingJobs = new Map();
-}
-
-// Process audio in background
-async function processAudioInBackground(jobId, audioBuffer, mimetype, originalFileName, options) {
-  try {
-    // Update job status
-    const jobInfo = global.processingJobs.get(jobId);
-    jobInfo.stage = 'transcribing';
-    addLog(LOG_LEVELS.INFO, 'system', `=== PROCESSING JOB ${jobId} STARTED ===`);
-    
-    // Transcribe audio
-    addLog(LOG_LEVELS.INFO, 'system', '=== TRANSCRIPTION PROCESS STARTED ===');
-    let transcriptionResult;
-    try {
-      // Use Deepgram API for transcription
-      transcriptionResult = await transcribeAudio(audioBuffer, mimetype);
-      addLog(LOG_LEVELS.SUCCESS, 'transcription', 'Transcription completed successfully');
-      jobInfo.stage = 'analyzing';
-    } catch (transcriptionError) {
-      addLog(LOG_LEVELS.ERROR, 'transcription', 'Error during transcription', {
-        error: transcriptionError.message,
-        stack: transcriptionError.stack
-      });
-      jobInfo.status = 'failed';
-      jobInfo.error = `Transcription failed: ${transcriptionError.message}`;
-      return;
-    }
-    
-    if (!transcriptionResult || !transcriptionResult.channels || 
-        !transcriptionResult.channels[0] || !transcriptionResult.channels[0].alternatives || 
-        !transcriptionResult.channels[0].alternatives[0]) {
-      addLog(LOG_LEVELS.ERROR, 'transcription', 'Invalid transcription result structure', {
-        result: JSON.stringify(transcriptionResult)
-      });
-      jobInfo.status = 'failed';
-      jobInfo.error = 'Invalid transcription result';
-      return;
-    }
-    
-    const transcript = transcriptionResult.channels[0].alternatives[0].transcript || '';
-    addLog(LOG_LEVELS.INFO, 'transcription', 'Transcript extracted from result', {
-      length: transcript.length,
-      excerpt: transcript.substring(0, 100) + (transcript.length > 100 ? '...' : '')
-    });
-    
-    // Find sensitive sections with timestamps
-    addLog(LOG_LEVELS.INFO, 'system', '=== SENSITIVE INFORMATION DETECTION STARTED ===');
-    const sensitiveSections = findSensitiveInfoWithTimestamps(transcriptionResult.channels[0].alternatives[0]);
-    addLog(LOG_LEVELS.INFO, 'redaction', `Found ${sensitiveSections.length} sensitive sections in the audio`);
-    jobInfo.stage = 'redacting';
-    
-    // Create redacted transcript
-    addLog(LOG_LEVELS.INFO, 'redaction', 'Creating redacted transcript...');
-    const redactedTranscript = redactSensitiveInfo(transcript);
-    addLog(LOG_LEVELS.SUCCESS, 'redaction', 'Redacted transcript created', {
-      originalLength: transcript.length,
-      redactedLength: redactedTranscript.length
-    });
-    
-    // Create audio with beeps
-    addLog(LOG_LEVELS.INFO, 'system', '=== AUDIO REDACTION PROCESS STARTED ===');
-    addLog(LOG_LEVELS.INFO, 'audio', `Processing audio with ${sensitiveSections.length} sensitive sections`);
-    
-    try {
-      addLog(LOG_LEVELS.INFO, 'audio', `Applying ${options.redactionMethod === 'beep' ? 'beep sounds' : 'muting'} to sensitive sections...`);
-      const redactedAudio = await createRedactedAudio(audioBuffer, mimetype, sensitiveSections, options);
-      jobInfo.stage = 'storing';
-      
-      // Store in database
-      addLog(LOG_LEVELS.INFO, 'system', '=== STORING IN DATABASE ===');
-      
-      const recording = {
-        originalFileName,
-        sensitiveInfoCount: sensitiveSections.length
-      };
-      
-      const storedRecording = await db.storeRecording(
-        recording,
-        redactedAudio.buffer,
-        redactedAudio.contentType,
-        redactedTranscript
-      );
-      
-      addLog(LOG_LEVELS.SUCCESS, 'system', `Recording stored in database with ID: ${storedRecording.id}`);
-      
-      const processingTime = ((Date.now() - jobInfo.createdAt) / 1000).toFixed(2);
-      addLog(LOG_LEVELS.SUCCESS, 'system', `=== JOB ${jobId} COMPLETED SUCCESSFULLY ===`, {
-        fileName: originalFileName,
-        sensitiveItems: sensitiveSections.length,
-        processingTime: `${processingTime} seconds`
-      });
-      
-      // Update job with success result
-      jobInfo.status = 'completed';
-      jobInfo.result = {
-        id: storedRecording.id,
-        originalFileName: originalFileName,
-        uploadDate: storedRecording.upload_date,
-        sensitiveInfoCount: sensitiveSections.length
-      };
-      
-    } catch (audioError) {
-      addLog(LOG_LEVELS.ERROR, 'audio', 'Error creating redacted audio', {
-        error: audioError.message,
-        stack: audioError.stack
-      });
-      
-      jobInfo.status = 'failed';
-      jobInfo.error = `Audio redaction failed: ${audioError.message}`;
-    }
-  } catch (error) {
-    console.error(`Error processing job ${jobId}:`, error);
-    const jobInfo = global.processingJobs.get(jobId);
-    if (jobInfo) {
-      jobInfo.status = 'failed';
-      jobInfo.error = error.message;
-    }
-    addLog(LOG_LEVELS.ERROR, 'system', `=== JOB ${jobId} FAILED ===`, {
-      error: error.message,
-      stack: error.stack
-    });
-  }
-}
-
 // Upload endpoint
 app.post('/api/upload', upload.single('audio'), async (req, res) => {
   try {
@@ -726,35 +599,109 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
       size: `${(audioBuffer.length / 1024 / 1024).toFixed(2)} MB`
     });
     
-    // Create a job ID
-    const jobId = Date.now().toString() + '-' + Math.random().toString(36).substring(2, 8);
+    // Transcribe audio
+    addLog(LOG_LEVELS.INFO, 'system', '=== TRANSCRIPTION PROCESS STARTED ===');
+
+    let transcriptionResult;
+    try {
+      // Use Deepgram API for transcription (with fallback mechanism)
+      transcriptionResult = await transcribeAudio(audioBuffer, mimetype);
+      addLog(LOG_LEVELS.SUCCESS, 'transcription', 'Transcription completed successfully');
+    } catch (transcriptionError) {
+      addLog(LOG_LEVELS.ERROR, 'transcription', 'Error during transcription', {
+        error: transcriptionError.message,
+        stack: transcriptionError.stack
+      });
+      return res.status(500).json({ 
+        error: 'Error transcribing audio file', 
+        details: process.env.NODE_ENV === 'development' ? transcriptionError.message : undefined 
+      });
+    }
     
-    // Store job info
-    global.processingJobs.set(jobId, {
-      id: jobId,
-      status: 'processing',
-      stage: 'starting',
-      originalFileName,
-      createdAt: new Date()
+    if (!transcriptionResult || !transcriptionResult.channels || 
+        !transcriptionResult.channels[0] || !transcriptionResult.channels[0].alternatives || 
+        !transcriptionResult.channels[0].alternatives[0]) {
+      addLog(LOG_LEVELS.ERROR, 'transcription', 'Invalid transcription result structure', {
+        result: JSON.stringify(transcriptionResult)
+      });
+      return res.status(500).json({ error: 'Invalid transcription result' });
+    }
+    
+    const transcript = transcriptionResult.channels[0].alternatives[0].transcript || '';
+    addLog(LOG_LEVELS.INFO, 'transcription', 'Transcript extracted from result', {
+      length: transcript.length,
+      excerpt: transcript.substring(0, 100) + (transcript.length > 100 ? '...' : '')
     });
     
-    // Return success immediately
-    res.json({
-      success: true,
-      jobId: jobId,
-      message: 'File uploaded successfully. Processing started.',
-      status: 'processing'
+    // Find sensitive sections with timestamps
+    addLog(LOG_LEVELS.INFO, 'system', '=== SENSITIVE INFORMATION DETECTION STARTED ===');
+    const sensitiveSections = findSensitiveInfoWithTimestamps(transcriptionResult.channels[0].alternatives[0]);
+    addLog(LOG_LEVELS.INFO, 'redaction', `Found ${sensitiveSections.length} sensitive sections in the audio`);
+    
+    // Create redacted transcript
+    addLog(LOG_LEVELS.INFO, 'redaction', 'Creating redacted transcript...');
+    const redactedTranscript = redactSensitiveInfo(transcript);
+    addLog(LOG_LEVELS.SUCCESS, 'redaction', 'Redacted transcript created', {
+      originalLength: transcript.length,
+      redactedLength: redactedTranscript.length
     });
-    // Process in background
-    const options = {
-      redactionMethod,
-      beepVolume,
-      audioVolume
-    };
     
-    // Start processing in the background
-    processAudioInBackground(jobId, audioBuffer, mimetype, originalFileName, options);
+    // Create audio with beeps
+    addLog(LOG_LEVELS.INFO, 'system', '=== AUDIO REDACTION PROCESS STARTED ===');
+    addLog(LOG_LEVELS.INFO, 'audio', `Processing audio with ${sensitiveSections.length} sensitive sections`);
     
+    try {
+      addLog(LOG_LEVELS.INFO, 'audio', `Applying ${redactionMethod === 'beep' ? 'beep sounds' : 'muting'} to sensitive sections...`);
+      const redactedAudio = await createRedactedAudio(audioBuffer, mimetype, sensitiveSections, {
+        redactionMethod,
+        beepVolume,
+        audioVolume
+      });
+      
+      // Store in database
+      addLog(LOG_LEVELS.INFO, 'system', '=== STORING IN DATABASE ===');
+      
+      const recording = {
+        originalFileName,
+        sensitiveInfoCount: sensitiveSections.length
+      };
+      
+      const storedRecording = await db.storeRecording(
+        recording,
+        redactedAudio.buffer,
+        redactedAudio.contentType,
+        redactedTranscript
+      );
+      
+      addLog(LOG_LEVELS.SUCCESS, 'system', `Recording stored in database with ID: ${storedRecording.id}`);
+      
+      const processingTime = ((Date.now() - new Date(req.file.originalname.split('.')[0])) / 1000).toFixed(2);
+      addLog(LOG_LEVELS.SUCCESS, 'system', '=== PROCESS COMPLETED SUCCESSFULLY ===', {
+        fileName: originalFileName,
+        sensitiveItems: sensitiveSections.length,
+        processingTime: `${processingTime} seconds`
+      });
+      
+      res.json({
+        success: true,
+        id: storedRecording.id,
+        originalFileName: originalFileName,
+        uploadDate: storedRecording.upload_date,
+        sensitiveInfoCount: sensitiveSections.length
+      });
+      
+    } catch (audioError) {
+      addLog(LOG_LEVELS.ERROR, 'audio', 'Error creating redacted audio', {
+        error: audioError.message,
+        stack: audioError.stack
+      });
+      
+      return res.status(500).json({ 
+        error: 'Critical Error: Audio redaction failed', 
+        details: audioError.message,
+        message: 'The system cannot proceed because audio redaction failed. This is a critical security feature.'
+      });
+    }
   } catch (error) {
     console.error('Error processing audio:', error);
     res.status(500).json({ 
@@ -762,27 +709,6 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
-});
-
-// Status endpoint to check processing status
-app.get('/api/status/:jobId', (req, res) => {
-  const jobId = req.params.jobId;
-  
-  if (!global.processingJobs || !global.processingJobs.has(jobId)) {
-    return res.status(404).json({ error: 'Job not found' });
-  }
-  
-  const jobInfo = global.processingJobs.get(jobId);
-  
-  res.json({
-    jobId: jobInfo.id,
-    status: jobInfo.status,
-    stage: jobInfo.stage || '',
-    originalFileName: jobInfo.originalFileName,
-    createdAt: jobInfo.createdAt,
-    result: jobInfo.result,
-    error: jobInfo.error
-  });
 });
 
 // Get all call recordings
@@ -821,118 +747,4 @@ app.get('/api/calls/:id', async (req, res) => {
     if (recording) {
       addLog(LOG_LEVELS.INFO, 'api', `Found recording: ${recording.original_filename}`);
       res.json({
-        id: recording.id,
-        originalFileName: recording.original_filename,
-        uploadDate: recording.upload_date,
-        sensitiveInfoCount: recording.sensitive_info_count
-      });
-    } else {
-      addLog(LOG_LEVELS.WARNING, 'api', `Recording not found with ID: ${req.params.id}`);
-      res.status(404).json({ error: 'Recording not found' });
-    }
-  } catch (error) {
-    addLog(LOG_LEVELS.ERROR, 'api', 'Error retrieving recording details', {
-      error: error.message,
-      stack: error.stack
-    });
-    
-    res.status(500).json({ error: 'Error retrieving recording details' });
-  }
-});
-
-// Download original audio
-app.get('/api/download/original/:id', async (req, res) => {
-  addLog(LOG_LEVELS.INFO, 'api', `=== API REQUEST: DOWNLOAD ORIGINAL AUDIO (ID: ${req.params.id}) ===`);
-  
-  try {
-    const recording = await db.getRecordingById(req.params.id);
-    
-    if (recording && recording.original_audio_data) {
-      addLog(LOG_LEVELS.INFO, 'api', `Sending original audio file: ${recording.original_filename}`);
-      
-      res.set('Content-Type', recording.original_content_type || 'audio/mpeg');
-      res.set('Content-Disposition', `attachment; filename="${recording.original_filename}"`);
-      res.send(recording.original_audio_data);
-    } else {
-      addLog(LOG_LEVELS.WARNING, 'api', `Original audio not found for ID: ${req.params.id}`);
-      res.status(404).json({ error: 'Original audio not found' });
-    }
-  } catch (error) {
-    addLog(LOG_LEVELS.ERROR, 'api', 'Error retrieving original audio', {
-      error: error.message,
-      stack: error.stack
-    });
-    
-    res.status(500).json({ error: 'Error retrieving original audio' });
-  }
-});
-
-// Download redacted audio
-app.get('/api/download/redacted/:id', async (req, res) => {
-  addLog(LOG_LEVELS.INFO, 'api', `=== API REQUEST: DOWNLOAD REDACTED AUDIO (ID: ${req.params.id}) ===`);
-  
-  try {
-    const recording = await db.getRecordingById(req.params.id);
-    
-    if (recording && recording.redacted_audio_data) {
-      addLog(LOG_LEVELS.INFO, 'api', `Sending redacted audio file: ${recording.original_filename}`);
-      
-      res.set('Content-Type', recording.redacted_content_type || 'audio/mpeg');
-      res.set('Content-Disposition', `attachment; filename="redacted_${recording.original_filename}"`);
-      res.send(recording.redacted_audio_data);
-    } else {
-      addLog(LOG_LEVELS.WARNING, 'api', `Redacted audio not found for ID: ${req.params.id}`);
-      res.status(404).json({ error: 'Redacted audio not found' });
-    }
-  } catch (error) {
-    addLog(LOG_LEVELS.ERROR, 'api', 'Error retrieving redacted audio', {
-      error: error.message,
-      stack: error.stack
-    });
-    
-    res.status(500).json({ error: 'Error retrieving redacted audio' });
-  }
-});
-
-// Download transcript
-app.get('/api/download/transcript/:id', async (req, res) => {
-  addLog(LOG_LEVELS.INFO, 'api', `=== API REQUEST: DOWNLOAD TRANSCRIPT (ID: ${req.params.id}) ===`);
-  
-  try {
-    const recording = await db.getRecordingById(req.params.id);
-    
-    if (recording && recording.redacted_transcript) {
-      addLog(LOG_LEVELS.INFO, 'api', `Sending transcript for: ${recording.original_filename}`);
-      
-      const fileName = `transcript_${path.basename(recording.original_filename, path.extname(recording.original_filename))}.txt`;
-      
-      res.set('Content-Type', 'text/plain');
-      res.set('Content-Disposition', `attachment; filename="${fileName}"`);
-      res.send(recording.redacted_transcript);
-    } else {
-      addLog(LOG_LEVELS.WARNING, 'api', `Transcript not found for ID: ${req.params.id}`);
-      res.status(404).json({ error: 'Transcript not found' });
-    }
-  } catch (error) {
-    addLog(LOG_LEVELS.ERROR, 'api', 'Error retrieving transcript', {
-      error: error.message,
-      stack: error.stack
-    });
-    
-    res.status(500).json({ error: 'Error retrieving transcript' });
-  }
-});
-
-// Get logs endpoint (for debugging)
-app.get('/api/logs', (req, res) => {
-  res.json(logs);
-});
-
-// Start server
-app.listen(port, () => {
-  addLog(LOG_LEVELS.INFO, 'system', '=== AUDIO REDACTION SERVER STARTED ===');
-  addLog(LOG_LEVELS.INFO, 'system', `Server running on port ${port}`);
-  addLog(LOG_LEVELS.INFO, 'system', `Server time: ${new Date().toISOString()}`);
-  addLog(LOG_LEVELS.INFO, 'system', 'API endpoints available');
-  addLog(LOG_LEVELS.SUCCESS, 'system', '=== SERVER READY ===');
-});
+        id:

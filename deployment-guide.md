@@ -283,6 +283,28 @@ tar -czf /var/backups/call-info-remover/files_$(date +%Y%m%d).tar.gz uploads/ pr
 tar -xzf /var/backups/call-info-remover/files_YYYYMMDD.tar.gz -C /var/www/coveredamerican.com/audio/
 ```
 
+## Cloudflare Integration
+
+The application uses a two-step upload process to work around Cloudflare's timeout limitations:
+
+1. **Step 1: Quick Upload**
+   - The initial upload request completes quickly (under 100 seconds)
+   - The server returns a job ID immediately after receiving the file
+   - This prevents Cloudflare 524 timeout errors for large files
+
+2. **Step 2: Background Processing**
+   - Processing continues in the background after the response is sent
+   - The frontend polls a status endpoint to track progress
+   - Users see real-time updates on processing stages
+
+### Cloudflare Settings
+
+If you're using Cloudflare with this application:
+
+- No special Cloudflare settings are required for the free plan
+- The application is designed to work within Cloudflare's default timeout limits
+- For even larger files, consider upgrading to Cloudflare Pro for adjustable timeouts
+
 ## Troubleshooting
 
 ### Common Issues
@@ -305,6 +327,11 @@ tar -xzf /var/backups/call-info-remover/files_YYYYMMDD.tar.gz -C /var/www/covere
 4. **Permission issues**
    - Check directory permissions: `ls -la /var/www/coveredamerican.com/audio/`
    - Fix permissions if needed: `sudo chown -R $USER:$USER /var/www/coveredamerican.com/audio/`
+
+5. **Cloudflare timeout errors (524)**
+   - If you still see 524 errors, check that the two-step upload process is working correctly
+   - Verify the status endpoint is accessible: `curl http://localhost:8531/api/status/[job-id]`
+   - Check server logs for any issues with the background processing
 
 ## Security Considerations
 

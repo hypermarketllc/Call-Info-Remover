@@ -1,0 +1,111 @@
+});
+    } else {
+      addLog(LOG_LEVELS.WARNING, 'api', `Recording not found with ID: ${req.params.id}`);
+      res.status(404).json({ error: 'Recording not found' });
+    }
+  } catch (error) {
+    addLog(LOG_LEVELS.ERROR, 'api', 'Error retrieving recording details', {
+      error: error.message,
+      stack: error.stack
+    });
+    
+    res.status(500).json({ error: 'Error retrieving recording details' });
+  }
+});
+
+// Download original audio
+app.get('/api/download/original/:id', async (req, res) => {
+  addLog(LOG_LEVELS.INFO, 'api', `=== API REQUEST: DOWNLOAD ORIGINAL AUDIO (ID: ${req.params.id}) ===`);
+  
+  try {
+    const recording = await db.getRecordingById(req.params.id);
+    
+    if (recording && recording.original_audio_data) {
+      addLog(LOG_LEVELS.INFO, 'api', `Sending original audio file: ${recording.original_filename}`);
+      
+      res.set('Content-Type', recording.original_content_type || 'audio/mpeg');
+      res.set('Content-Disposition', `attachment; filename="${recording.original_filename}"`);
+      res.send(recording.original_audio_data);
+    } else {
+      addLog(LOG_LEVELS.WARNING, 'api', `Original audio not found for ID: ${req.params.id}`);
+      res.status(404).json({ error: 'Original audio not found' });
+    }
+  } catch (error) {
+    addLog(LOG_LEVELS.ERROR, 'api', 'Error retrieving original audio', {
+      error: error.message,
+      stack: error.stack
+    });
+    
+    res.status(500).json({ error: 'Error retrieving original audio' });
+  }
+});
+
+// Download redacted audio
+app.get('/api/download/redacted/:id', async (req, res) => {
+  addLog(LOG_LEVELS.INFO, 'api', `=== API REQUEST: DOWNLOAD REDACTED AUDIO (ID: ${req.params.id}) ===`);
+  
+  try {
+    const recording = await db.getRecordingById(req.params.id);
+    
+    if (recording && recording.redacted_audio_data) {
+      addLog(LOG_LEVELS.INFO, 'api', `Sending redacted audio file: ${recording.original_filename}`);
+      
+      res.set('Content-Type', recording.redacted_content_type || 'audio/mpeg');
+      res.set('Content-Disposition', `attachment; filename="redacted_${recording.original_filename}"`);
+      res.send(recording.redacted_audio_data);
+    } else {
+      addLog(LOG_LEVELS.WARNING, 'api', `Redacted audio not found for ID: ${req.params.id}`);
+      res.status(404).json({ error: 'Redacted audio not found' });
+    }
+  } catch (error) {
+    addLog(LOG_LEVELS.ERROR, 'api', 'Error retrieving redacted audio', {
+      error: error.message,
+      stack: error.stack
+    });
+    
+    res.status(500).json({ error: 'Error retrieving redacted audio' });
+  }
+});
+
+// Download transcript
+app.get('/api/download/transcript/:id', async (req, res) => {
+  addLog(LOG_LEVELS.INFO, 'api', `=== API REQUEST: DOWNLOAD TRANSCRIPT (ID: ${req.params.id}) ===`);
+  
+  try {
+    const recording = await db.getRecordingById(req.params.id);
+    
+    if (recording && recording.redacted_transcript) {
+      addLog(LOG_LEVELS.INFO, 'api', `Sending transcript for: ${recording.original_filename}`);
+      
+      const fileName = `transcript_${path.basename(recording.original_filename, path.extname(recording.original_filename))}.txt`;
+      
+      res.set('Content-Type', 'text/plain');
+      res.set('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.send(recording.redacted_transcript);
+    } else {
+      addLog(LOG_LEVELS.WARNING, 'api', `Transcript not found for ID: ${req.params.id}`);
+      res.status(404).json({ error: 'Transcript not found' });
+    }
+  } catch (error) {
+    addLog(LOG_LEVELS.ERROR, 'api', 'Error retrieving transcript', {
+      error: error.message,
+      stack: error.stack
+    });
+    
+    res.status(500).json({ error: 'Error retrieving transcript' });
+  }
+});
+
+// Get logs endpoint (for debugging)
+app.get('/api/logs', (req, res) => {
+  res.json(logs);
+});
+
+// Start server
+app.listen(port, () => {
+  addLog(LOG_LEVELS.INFO, 'system', '=== AUDIO REDACTION SERVER STARTED ===');
+  addLog(LOG_LEVELS.INFO, 'system', `Server running on port ${port}`);
+  addLog(LOG_LEVELS.INFO, 'system', `Server time: ${new Date().toISOString()}`);
+  addLog(LOG_LEVELS.INFO, 'system', 'API endpoints available');
+  addLog(LOG_LEVELS.SUCCESS, 'system', '=== SERVER READY ===');
+});

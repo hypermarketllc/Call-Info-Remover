@@ -12,6 +12,8 @@ This system allows users to upload audio files, automatically transcribe them, i
 - **Audio Redaction**: Replaces sensitive information with beep sounds
 - **Secure Storage**: Maintains both original and redacted versions with proper access controls
 - **User-Friendly Interface**: Clean, intuitive web interface for easy file management
+- **Two-Step Processing**: Handles large files efficiently by separating upload and processing steps
+- **Cloudflare Compatible**: Works with Cloudflare's timeout limitations for large file uploads
 
 ## Security Features
 

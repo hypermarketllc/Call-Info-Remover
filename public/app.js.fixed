@@ -224,7 +224,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         
         try {
-            const response = await fetch('/api/settings/deepgram-key', {
+            const response = await fetch('/audio/api/settings/deepgram-key', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -328,30 +328,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (xhr.status >= 200 && xhr.status < 300) {
                     try {
                         const response = JSON.parse(xhr.responseText);
-                        
-                        if (response.jobId) {
-                            // Two-step process: file uploaded, now poll for status
-                            console.log(`File ${currentFileIndex + 1} uploaded, processing started. Job ID: ${response.jobId}`);
-                            progressText.textContent = `Processing file ${currentFileIndex + 1} of ${selectedFiles.length}: ${fileName}`;
-                            
-                            // Poll for job status
-                            pollJobStatus(response.jobId, fileName, currentFileIndex);
-                        } else {
-                            // Old API response format (direct completion)
-                            successCount++;
-                            console.log(`File ${currentFileIndex + 1} processed successfully:`, response);
-                            
-                            // Process next file
-                            currentFileIndex++;
-                            processNextFile();
-                        }
+                        successCount++;
+                        console.log(`File ${currentFileIndex + 1} processed successfully:`, response);
                     } catch (parseError) {
                         console.error('Error parsing response:', parseError);
                         errorCount++;
-                        
-                        // Process next file
-                        currentFileIndex++;
-                        processNextFile();
                     }
                 } else {
                     errorCount++;
@@ -376,75 +357,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     
                     console.error(`Error processing file ${fileName}:`, errorMessage, errorDetails);
-                    
-                    // Process next file
-                    currentFileIndex++;
-                    processNextFile();
                 }
-            });
-            
-            // Function to poll job status
-            function pollJobStatus(jobId, fileName, fileIndex) {
-                const statusUrl = `/api/status/${jobId}`;
-                let pollCount = 0;
-                const maxPolls = 300; // Maximum number of polling attempts (15 minutes at 3-second intervals)
                 
-                const pollInterval = setInterval(() => {
-                    pollCount++;
-                    
-                    if (pollCount > maxPolls) {
-                        clearInterval(pollInterval);
-                        console.error(`Polling timeout for job ${jobId}`);
-                        errorCount++;
-                        currentFileIndex++;
-                        processNextFile();
-                        return;
-                    }
-                    
-                    fetch(statusUrl)
-                        .then(response => {
-                            if (!response.ok) {
-                                throw new Error(`Status check failed: ${response.status}`);
-                            }
-                            return response.json();
-                        })
-                        .then(data => {
-                            // Update progress based on stage
-                            const fileProgress = ((fileIndex + 0.5) / selectedFiles.length) * 100;
-                            progressFill.style.width = `${fileProgress}%`;
-                            
-                            if (data.stage) {
-                                progressText.textContent = `Processing file ${fileIndex + 1} of ${selectedFiles.length}: ${fileName} (${data.stage})`;
-                            }
-                            
-                            if (data.status === 'completed') {
-                                // Processing complete
-                                clearInterval(pollInterval);
-                                successCount++;
-                                console.log(`File ${fileIndex + 1} processed successfully:`, data.result);
-                                
-                                // Process next file
-                                currentFileIndex++;
-                                processNextFile();
-                            } else if (data.status === 'failed') {
-                                // Processing failed
-                                clearInterval(pollInterval);
-                                errorCount++;
-                                console.error(`Error processing file ${fileName}:`, data.error || 'Unknown error');
-                                
-                                // Process next file
-                                currentFileIndex++;
-                                processNextFile();
-                            }
-                            // If still processing, continue polling
-                        })
-                        .catch(error => {
-                            console.error(`Error checking job status for ${fileName}:`, error);
-                            // Don't increment error count or move to next file on polling errors,
-                            // just continue polling until timeout
-                        });
-                }, 3000); // Poll every 3 seconds
-            }
+                // Process next file regardless of success/failure
+                currentFileIndex++;
+                processNextFile();
+            });
             
             xhr.addEventListener('error', () => {
                 console.error(`Network error processing file ${fileName}`);
@@ -462,7 +380,7 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Set timeout to 5 minutes for large files that need processing
             xhr.timeout = 300000;
-            xhr.open('POST', '/api/upload');
+            xhr.open('POST', '/audio/api/upload');
             xhr.send(formData);
         };
         
@@ -472,7 +390,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Fetch and display recordings
     function fetchRecordings() {
-        fetch('/api/calls')
+        fetch('/audio/api/calls')
             .then(response => {
                 if (!response.ok) {
                     throw new Error(`Server returned ${response.status}: ${response.statusText}`);
@@ -560,19 +478,19 @@ document.addEventListener('DOMContentLoaded', function() {
         // Add event listeners for download buttons
         document.querySelectorAll('.download-original').forEach(button => {
             button.addEventListener('click', () => {
-                window.location.href = `/api/download/original/${button.dataset.id}`;
+                window.location.href = `/audio/api/download/original/${button.dataset.id}`;
             });
         });
         
         document.querySelectorAll('.download-redacted').forEach(button => {
             button.addEventListener('click', () => {
-                window.location.href = `/api/download/redacted/${button.dataset.id}`;
+                window.location.href = `/audio/api/download/redacted/${button.dataset.id}`;
             });
         });
         
         document.querySelectorAll('.download-transcript').forEach(button => {
             button.addEventListener('click', () => {
-                window.location.href = `/api/download/transcript/${button.dataset.id}`;
+                window.location.href = `/audio/api/download/transcript/${button.dataset.id}`;
             });
         });
     }
