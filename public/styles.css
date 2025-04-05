@@ -266,6 +266,32 @@ h2 {
 .file-preview {
     padding: 10px;
     text-align: left;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.batch-summary {
+    margin-bottom: 15px;
+    padding: 10px;
+    background-color: #e3f2fd;
+    border-radius: 6px;
+    border-left: 4px solid #2196F3;
+}
+
+.batch-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.batch-title {
+    font-weight: 600;
+    color: #0d47a1;
+}
+
+.batch-size {
+    font-size: 12px;
+    color: #1976d2;
 }
 
 .file-item {
@@ -275,6 +301,11 @@ h2 {
     padding: 8px;
     border-radius: 6px;
     background-color: #f8f9fe;
+    transition: all 0.2s;
+}
+
+.file-item:hover {
+    background-color: #f0f4ff;
 }
 
 .file-icon {
@@ -306,6 +337,22 @@ h2 {
 .file-size {
     font-size: 12px;
     color: #999;
+}
+
+.file-remove {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #f44336;
+    cursor: pointer;
+    border-radius: 50%;
+    transition: all 0.2s;
+}
+
+.file-remove:hover {
+    background-color: #ffebee;
 }
 
 .upload-progress {

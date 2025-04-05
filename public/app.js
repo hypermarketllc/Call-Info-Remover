@@ -28,7 +28,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    let selectedFile = null;
+    let selectedFiles = [];
     
     // Prevent default behavior for drag events
     ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
@@ -85,59 +85,112 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Handle files selection
     function handleFiles(files) {
-        // Only accept the first file and only audio files
-        const file = files[0];
+        // Filter out non-audio files
+        selectedFiles = Array.from(files).filter(file => {
+            if (!file.type.startsWith('audio/')) {
+                return false;
+            }
+            return true;
+        });
         
-        if (!file.type.startsWith('audio/')) {
-            alert('Please select an audio file.');
+        if (selectedFiles.length === 0) {
+            alert('Please select at least one audio file.');
             return;
         }
         
-        selectedFile = file;
-        updateFilePreview(file);
-        uploadBtn.disabled = false;
+        if (files.length !== selectedFiles.length) {
+            alert(`${files.length - selectedFiles.length} file(s) were skipped because they are not audio files.`);
+        }
+        
+        updateFilePreview(selectedFiles);
+        uploadBtn.disabled = selectedFiles.length === 0;
         dropArea.classList.add('has-file');
     }
     
-    function updateFilePreview(file) {
+    function updateFilePreview(files) {
         // Clear previous preview
         filePreview.innerHTML = '';
         
-        // Create preview element
-        const fileItem = document.createElement('div');
-        fileItem.className = 'file-item';
-        
-        // Format file size
-        const fileSizeInKB = file.size / 1024;
-        let fileSize;
-        if (fileSizeInKB < 1024) {
-            fileSize = fileSizeInKB.toFixed(1) + ' KB';
-        } else {
-            fileSize = (fileSizeInKB / 1024).toFixed(1) + ' MB';
+        // Add batch summary if multiple files
+        if (files.length > 1) {
+            const batchSummary = document.createElement('div');
+            batchSummary.className = 'batch-summary';
+            
+            // Calculate total size
+            const totalSizeBytes = files.reduce((total, file) => total + file.size, 0);
+            const totalSizeFormatted = formatFileSize(totalSizeBytes);
+            
+            batchSummary.innerHTML = `
+                <div class="batch-header">
+                    <span class="batch-title">Batch Processing: ${files.length} Files</span>
+                    <span class="batch-size">Total Size: ${totalSizeFormatted}</span>
+                </div>
+            `;
+            filePreview.appendChild(batchSummary);
         }
         
-        fileItem.innerHTML = `
-            <div class="file-icon">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M17.5 22h.5c.5 0 1-.2 1.4-.6.4-.4.6-.9.6-1.4V7.5L14.5 2H6c-.5 0-1 .2-1.4.6C4.2 3 4 3.5 4 4v3"></path>
-                    <path d="M14 2v6h6"></path>
-                    <circle cx="10" cy="16" r="6"></circle>
-                    <path d="M8 16v-1.5a2 2 0 0 1 4 0V16"></path>
-                    <path d="M10 19v-6"></path>
-                </svg>
-            </div>
-            <div class="file-info">
-                <div class="file-name">${file.name}</div>
-                <div class="file-size">${fileSize}</div>
-            </div>
-        `;
+        // Add each file to the preview
+        files.forEach((file, index) => {
+            const fileItem = document.createElement('div');
+            fileItem.className = 'file-item';
+            
+            // Format file size
+            const fileSize = formatFileSize(file.size);
+            
+            fileItem.innerHTML = `
+                <div class="file-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M17.5 22h.5c.5 0 1-.2 1.4-.6.4-.4.6-.9.6-1.4V7.5L14.5 2H6c-.5 0-1 .2-1.4.6C4.2 3 4 3.5 4 4v3"></path>
+                        <path d="M14 2v6h6"></path>
+                        <circle cx="10" cy="16" r="6"></circle>
+                        <path d="M8 16v-1.5a2 2 0 0 1 4 0V16"></path>
+                        <path d="M10 19v-6"></path>
+                    </svg>
+                </div>
+                <div class="file-info">
+                    <div class="file-name">${file.name}</div>
+                    <div class="file-size">${fileSize}</div>
+                </div>
+                <div class="file-remove" data-index="${index}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </div>
+            `;
+            
+            filePreview.appendChild(fileItem);
+        });
         
-        filePreview.appendChild(fileItem);
+        // Add event listeners for remove buttons
+        document.querySelectorAll('.file-remove').forEach(button => {
+            button.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const index = parseInt(button.dataset.index);
+                selectedFiles.splice(index, 1);
+                updateFilePreview(selectedFiles);
+                uploadBtn.disabled = selectedFiles.length === 0;
+                if (selectedFiles.length === 0) {
+                    dropArea.classList.remove('has-file');
+                }
+            });
+        });
     }
     
-    // Clear selected file
+    // Helper function to format file size
+    function formatFileSize(bytes) {
+        if (bytes < 1024) {
+            return `${bytes} B`;
+        } else if (bytes < 1024 * 1024) {
+            return `${(bytes / 1024).toFixed(1)} KB`;
+        } else {
+            return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+        }
+    }
+    
+    // Clear selected files
     clearBtn.addEventListener('click', () => {
-        selectedFile = null;
+        selectedFiles = [];
         filePreview.innerHTML = '';
         fileInput.value = '';
         uploadBtn.disabled = true;
@@ -193,9 +246,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Upload file
+    // Upload files
     uploadBtn.addEventListener('click', async () => {
-        if (!selectedFile) {
+        if (selectedFiles.length === 0) {
             return;
         }
         
@@ -208,27 +261,65 @@ document.addEventListener('DOMContentLoaded', function() {
         const beepVolume = parseFloat(beepVolumeSlider.value) / 100; // Convert percentage to decimal (0.0-1.0)
         const audioVolume = parseFloat(audioVolumeSlider.value) / 100; // Convert percentage to decimal
         
-        console.log(`Sending audio processing request with: beepVolume=${beepVolume}, audioVolume=${audioVolume}`);
+        // Process files sequentially
+        let currentFileIndex = 0;
+        let successCount = 0;
+        let errorCount = 0;
         
-        // Create form data
-        const formData = new FormData();
-        formData.append('audio', selectedFile);
-        formData.append('beepVolume', beepVolume);
-        formData.append('audioVolume', audioVolume);
-        
-        try {
-            // Start upload with progress monitoring
+        const processNextFile = () => {
+            if (currentFileIndex >= selectedFiles.length) {
+                // All files processed
+                const totalFiles = selectedFiles.length;
+                progressText.textContent = `Completed: ${successCount} of ${totalFiles} files processed successfully`;
+                
+                setTimeout(() => {
+                    // Reset form
+                    clearBtn.click();
+                    uploadProgress.classList.add('hidden');
+                    
+                    // Refresh recordings list
+                    fetchRecordings();
+                    
+                    // Show summary
+                    if (errorCount > 0) {
+                        alert(`Batch processing completed with ${errorCount} errors.\n${successCount} of ${totalFiles} files were processed successfully.`);
+                    } else {
+                        alert(`Batch processing completed successfully. All ${totalFiles} files were processed.`);
+                    }
+                }, 1000);
+                
+                return;
+            }
+            
+            const file = selectedFiles[currentFileIndex];
+            const fileName = file.name;
+            
+            // Update progress
+            const overallProgress = (currentFileIndex / selectedFiles.length) * 100;
+            progressFill.style.width = `${overallProgress}%`;
+            progressText.textContent = `Processing file ${currentFileIndex + 1} of ${selectedFiles.length}: ${fileName}`;
+            
+            // Create form data for this file
+            const formData = new FormData();
+            formData.append('audio', file);
+            formData.append('beepVolume', beepVolume);
+            formData.append('audioVolume', audioVolume);
+            
+            // Upload the file
             const xhr = new XMLHttpRequest();
             
             xhr.upload.addEventListener('progress', (event) => {
                 if (event.lengthComputable) {
-                    const percentComplete = (event.loaded / event.total) * 100;
-                    progressFill.style.width = percentComplete + '%';
+                    // Calculate file progress
+                    const fileProgress = (event.loaded / event.total) * 100;
+                    // Calculate overall progress (previous files + current file progress)
+                    const overallProgress = ((currentFileIndex + (event.loaded / event.total)) / selectedFiles.length) * 100;
+                    progressFill.style.width = `${overallProgress}%`;
                     
-                    if (percentComplete < 100) {
-                        progressText.textContent = `Uploading... ${Math.round(percentComplete)}%`;
+                    if (fileProgress < 100) {
+                        progressText.textContent = `Uploading file ${currentFileIndex + 1} of ${selectedFiles.length}: ${fileName} (${Math.round(fileProgress)}%)`;
                     } else {
-                        progressText.textContent = 'Processing audio...';
+                        progressText.textContent = `Processing file ${currentFileIndex + 1} of ${selectedFiles.length}: ${fileName}`;
                     }
                 }
             });
@@ -237,28 +328,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (xhr.status >= 200 && xhr.status < 300) {
                     try {
                         const response = JSON.parse(xhr.responseText);
-                        
-                        // Show success message
-                        progressText.textContent = 'Upload complete!';
-                        progressFill.style.width = '100%';
-                        
-                        setTimeout(() => {
-                            // Reset form
-                            clearBtn.click();
-                            uploadProgress.classList.add('hidden');
-                            
-                            // Refresh recordings list
-                            fetchRecordings();
-                        }, 1000);
+                        successCount++;
+                        console.log(`File ${currentFileIndex + 1} processed successfully:`, response);
                     } catch (parseError) {
                         console.error('Error parsing response:', parseError);
-                        progressText.textContent = 'Error processing server response';
-                        setTimeout(() => {
-                            uploadProgress.classList.add('hidden');
-                        }, 3000);
+                        errorCount++;
                     }
                 } else {
-                    // Show error
+                    errorCount++;
                     let errorMessage = 'An error occurred during upload.';
                     let errorDetails = '';
                     
@@ -267,67 +344,48 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (errorResponse && errorResponse.error) {
                             errorMessage = errorResponse.error;
                             
-                            // Check for additional details
                             if (errorResponse.details) {
                                 errorDetails = errorResponse.details;
                             }
                             
-                            // Check for user-friendly message
                             if (errorResponse.message) {
                                 errorDetails += '\n\n' + errorResponse.message;
                             }
                         }
                     } catch (e) {
-                        // If we can't parse the error, use the default message
                         console.error('Error parsing error response:', e);
                     }
                     
-                    progressText.textContent = 'Upload failed';
-                    
-                    // Show a more detailed error message
-                    if (errorDetails) {
-                        alert(`Error: ${errorMessage}\n\nDetails: ${errorDetails}`);
-                    } else {
-                        alert(`Error: ${errorMessage}`);
-                    }
-                    
-                    // Error handling in production mode
-                    
-                    setTimeout(() => {
-                        uploadProgress.classList.add('hidden');
-                    }, 3000);
+                    console.error(`Error processing file ${fileName}:`, errorMessage, errorDetails);
                 }
+                
+                // Process next file regardless of success/failure
+                currentFileIndex++;
+                processNextFile();
             });
             
             xhr.addEventListener('error', () => {
-                progressText.textContent = 'Network error';
-                alert('A network error occurred. Please check your connection and try again.');
-                setTimeout(() => {
-                    uploadProgress.classList.add('hidden');
-                }, 3000);
+                console.error(`Network error processing file ${fileName}`);
+                errorCount++;
+                currentFileIndex++;
+                processNextFile();
             });
             
             xhr.addEventListener('timeout', () => {
-                progressText.textContent = 'Request timed out';
-                alert('The request timed out. The server might be busy processing other files.');
-                setTimeout(() => {
-                    uploadProgress.classList.add('hidden');
-                }, 3000);
+                console.error(`Timeout processing file ${fileName}`);
+                errorCount++;
+                currentFileIndex++;
+                processNextFile();
             });
             
             // Set timeout to 5 minutes for large files that need processing
             xhr.timeout = 300000;
             xhr.open('POST', '/api/upload');
             xhr.send(formData);
-            
-        } catch (error) {
-            console.error('Error uploading file:', error);
-            progressText.textContent = 'Upload failed';
-            alert(`An error occurred: ${error.message || 'Unknown error'}`);
-            setTimeout(() => {
-                uploadProgress.classList.add('hidden');
-            }, 3000);
-        }
+        };
+        
+        // Start processing the first file
+        processNextFile();
     });
 
     // Fetch and display recordings
