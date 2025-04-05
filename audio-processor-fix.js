@@ -146,9 +146,9 @@ module.exports = {
       try {
         // Default options
         const config = {
-          redactionMethod: 'beep', // 'beep' or 'mute'
-          beepVolume: 0.2,         // Beep volume (0.0-1.0)
-          audioVolume: 1.0,        // Original audio volume multiplier (1.0 = unchanged)
+          redactionMethod: 'beep', // Always use beep
+          beepVolume: 0.0001,      // Default to 0.01%
+          audioVolume: 1.25,       // Default to 125% volume
           ...options
         };
         

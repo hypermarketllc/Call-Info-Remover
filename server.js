@@ -1,6 +1,9 @@
 // Load environment variables from .env file
 require('dotenv').config();
 
+// Set production mode
+process.env.NODE_ENV = process.env.NODE_ENV || 'production';
+
 const express = require('express');
 const multer = require('multer');
 const { Deepgram } = require('@deepgram/sdk');
@@ -22,19 +25,42 @@ const LOG_LEVELS = {
 };
 
 function addLog(level, category, message, details = null) {
+  // Simplify details to reduce verbosity
+  let simplifiedDetails = null;
+  if (details) {
+    // Only include essential information in details
+    if (typeof details === 'object') {
+      const essentialKeys = ['error', 'count', 'status', 'type'];
+      simplifiedDetails = {};
+      
+      for (const key of Object.keys(details)) {
+        if (essentialKeys.includes(key) || key.includes('Count') || key.includes('Path')) {
+          simplifiedDetails[key] = details[key];
+        }
+      }
+      
+      // If no essential keys were found, provide a simple summary
+      if (Object.keys(simplifiedDetails).length === 0) {
+        simplifiedDetails = 'Details available but simplified';
+      }
+    } else {
+      simplifiedDetails = details;
+    }
+  }
+  
   const log = {
     timestamp: new Date().toISOString(),
     level,
     category,
     message,
-    details
+    details: simplifiedDetails
   };
   
   logs.push(log);
   console.log(`[${log.level.toUpperCase()}][${log.category}] ${log.message}`);
   
-  // Keep only the last 1000 logs to prevent memory issues
-  if (logs.length > 1000) {
+  // Keep only the last 500 logs to prevent memory issues (reduced from 1000)
+  if (logs.length > 500) {
     logs.shift();
   }
   
@@ -109,8 +135,21 @@ const upload = multer({
 // Import axios for direct HTTP requests
 const axios = require('axios');
 
-// Initialize Deepgram API key from environment variables
-const apiKey = process.env.DEEPGRAM_API_KEY || 'YOUR_DEEPGRAM_API_KEY';
+// Initialize Deepgram API key from environment variables or stored key
+let apiKey = process.env.DEEPGRAM_API_KEY || 'YOUR_DEEPGRAM_API_KEY';
+
+// Try to read the API key from a file if it exists
+try {
+  if (fs.existsSync('deepgram-api-key.txt')) {
+    const storedKey = fs.readFileSync('deepgram-api-key.txt', 'utf8').trim();
+    if (storedKey) {
+      apiKey = storedKey;
+    }
+  }
+} catch (error) {
+  console.error('Error reading stored API key:', error);
+}
+
 addLog(LOG_LEVELS.INFO, 'system', 'Initializing Deepgram API client', { 
   apiKeyProvided: apiKey !== 'YOUR_DEEPGRAM_API_KEY' 
 });
@@ -641,6 +680,34 @@ async function createRedactedAudio(originalPath, sensitiveSections, outputPath, 
 // Simple in-memory database (replace with a real database in production)
 const callDatabase = [];
 
+// API endpoint to update Deepgram API key
+app.post('/api/settings/deepgram-key', express.json(), (req, res) => {
+  try {
+    const { apiKey: newApiKey } = req.body;
+    
+    if (!newApiKey || typeof newApiKey !== 'string' || newApiKey.trim() === '') {
+      return res.status(400).json({ error: 'Invalid API key provided' });
+    }
+    
+    // Store the API key in a file
+    fs.writeFileSync('deepgram-api-key.txt', newApiKey.trim());
+    
+    // Update the current API key
+    apiKey = newApiKey.trim();
+    
+    addLog(LOG_LEVELS.SUCCESS, 'system', 'Deepgram API key updated successfully');
+    
+    return res.json({ success: true });
+  } catch (error) {
+    addLog(LOG_LEVELS.ERROR, 'system', 'Error updating Deepgram API key', {
+      error: error.message,
+      stack: error.stack
+    });
+    
+    return res.status(500).json({ error: 'Failed to update API key' });
+  }
+});
+
 // Upload endpoint
 app.post('/api/upload', upload.single('audio'), async (req, res) => {
   try {
@@ -653,9 +720,10 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
     }
 
     // Get redaction options from request
-    const redactionMethod = req.body.redactionMethod || 'beep';
-    const beepVolume = parseFloat(req.body.beepVolume) || 0.2;
-    const audioVolume = parseFloat(req.body.audioVolume) || 1.0;
+    // Always use 'beep' as the redaction method
+    const redactionMethod = 'beep';
+    const beepVolume = parseFloat(req.body.beepVolume) || 0.0001; // Default to 0.01%
+    const audioVolume = parseFloat(req.body.audioVolume) || 1.25; // Default to 125%
     
     addLog(LOG_LEVELS.INFO, 'system', 'Redaction options received', {
       redactionMethod,

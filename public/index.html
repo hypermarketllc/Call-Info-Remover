@@ -7,6 +7,33 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+    <div class="settings-widget" id="settings-widget">
+        <div class="settings-icon" id="settings-toggle">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+        </div>
+        <div class="settings-panel hidden" id="settings-panel">
+            <h3>Settings</h3>
+            <div class="option-group" id="beep-volume-container">
+                <label for="beep-volume">Beep Volume: <span id="volume-value">0.01%</span></label>
+                <input type="range" id="beep-volume" min="0.01" max="100" value="0.01" class="slider">
+            </div>
+            
+            <div class="option-group">
+                <label for="audio-volume">Audio Volume: <span id="audio-volume-value">125%</span></label>
+                <input type="range" id="audio-volume" min="50" max="300" value="125" class="slider">
+            </div>
+            
+            <div class="option-group">
+                <label for="deepgram-api-key">Deepgram API Key:</label>
+                <input type="password" id="deepgram-api-key" class="text-input" placeholder="Enter your Deepgram API key">
+                <button id="save-api-key" class="btn btn-small">Save</button>
+            </div>
+        </div>
+    </div>
+
     <div class="container">
         <div class="upload-card">
             <h1>Call Info Remover</h1>
@@ -14,37 +41,7 @@
             
             <div id="drop-area" class="drop-area">
                 <div class="drop-message">Drag and drop files here or click to select</div>
-            </div>
-            
-            <div style="margin-bottom: 15px; text-align: center;">
-                <input type="file" id="file-input" accept="audio/*" />
-            </div>
-            
-            <div class="redaction-options">
-                <h3>Redaction Options</h3>
-                <div class="option-group">
-                    <label>Redaction Method:</label>
-                    <div class="radio-group">
-                        <label>
-                            <input type="radio" name="redaction-method" value="beep" checked> 
-                            Beep Sound
-                        </label>
-                        <label>
-                            <input type="radio" name="redaction-method" value="mute"> 
-                            Mute (Silence)
-                        </label>
-                    </div>
-                </div>
-                
-                <div class="option-group" id="beep-volume-container">
-                    <label for="beep-volume">Beep Volume: <span id="volume-value">20%</span></label>
-                    <input type="range" id="beep-volume" min="1" max="100" value="20" class="slider">
-                </div>
-                
-                <div class="option-group">
-                    <label for="audio-volume">Audio Volume: <span id="audio-volume-value">100%</span></label>
-                    <input type="range" id="audio-volume" min="50" max="300" value="100" class="slider">
-                </div>
+                <input type="file" id="file-input" accept="audio/*" hidden />
             </div>
             
             <div class="button-group">
@@ -68,26 +65,7 @@
             </div>
         </div>
 
-        <div class="logs-card hidden" id="logs-card">
-            <div class="logs-header">
-                <h2>Processing Logs</h2>
-                <div class="logs-controls">
-                    <select id="log-filter">
-                        <option value="all">All Logs</option>
-                        <option value="api">API</option>
-                        <option value="redaction">Redaction</option>
-                        <option value="transcription">Transcription</option>
-                        <option value="audio">Audio Processing</option>
-                        <option value="system">System</option>
-                    </select>
-                    <button id="refresh-logs" class="btn btn-secondary">Refresh</button>
-                    <button id="clear-logs" class="btn btn-secondary">Clear</button>
-                </div>
-            </div>
-            <div id="logs-container" class="logs-container">
-                <!-- Logs will be displayed here -->
-            </div>
-        </div>
+        <!-- Logs section removed for production mode -->
     </div>
     
     <script src="app.js"></script>

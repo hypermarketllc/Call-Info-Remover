@@ -10,6 +10,24 @@ document.addEventListener('DOMContentLoaded', function() {
     const recordingsCard = document.getElementById('recordings-card');
     const recordingsList = document.getElementById('recordings-list');
     
+    // Settings widget elements
+    const settingsToggle = document.getElementById('settings-toggle');
+    const settingsPanel = document.getElementById('settings-panel');
+    
+    // Toggle settings panel
+    settingsToggle.addEventListener('click', () => {
+        settingsPanel.classList.toggle('hidden');
+    });
+    
+    // Close settings panel when clicking outside
+    document.addEventListener('click', (event) => {
+        if (!settingsPanel.classList.contains('hidden') && 
+            !settingsPanel.contains(event.target) && 
+            !settingsToggle.contains(event.target)) {
+            settingsPanel.classList.add('hidden');
+        }
+    });
+    
     let selectedFile = null;
     
     // Prevent default behavior for drag events
@@ -126,13 +144,13 @@ document.addEventListener('DOMContentLoaded', function() {
         dropArea.classList.remove('has-file');
     });
     
-    // Redaction options handling
-    const redactionMethodRadios = document.querySelectorAll('input[name="redaction-method"]');
+    // Settings handling
     const beepVolumeSlider = document.getElementById('beep-volume');
     const volumeValueDisplay = document.getElementById('volume-value');
-    const beepVolumeContainer = document.getElementById('beep-volume-container');
     const audioVolumeSlider = document.getElementById('audio-volume');
     const audioVolumeValueDisplay = document.getElementById('audio-volume-value');
+    const deepgramApiKeyInput = document.getElementById('deepgram-api-key');
+    const saveApiKeyBtn = document.getElementById('save-api-key');
     
     // Update volume displays when sliders change
     beepVolumeSlider.addEventListener('input', () => {
@@ -143,15 +161,36 @@ document.addEventListener('DOMContentLoaded', function() {
         audioVolumeValueDisplay.textContent = `${audioVolumeSlider.value}%`;
     });
     
-    // Show/hide volume slider based on redaction method
-    redactionMethodRadios.forEach(radio => {
-        radio.addEventListener('change', () => {
-            if (radio.value === 'beep') {
-                beepVolumeContainer.style.display = 'block';
+    // Save Deepgram API key
+    saveApiKeyBtn.addEventListener('click', async () => {
+        const apiKey = deepgramApiKeyInput.value.trim();
+        
+        if (!apiKey) {
+            alert('Please enter a valid API key');
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/settings/deepgram-key', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ apiKey })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                alert('API key saved successfully');
+                deepgramApiKeyInput.value = '';
             } else {
-                beepVolumeContainer.style.display = 'none';
+                alert(`Failed to save API key: ${result.error || 'Unknown error'}`);
             }
-        });
+        } catch (error) {
+            console.error('Error saving API key:', error);
+            alert(`Error saving API key: ${error.message || 'Network error'}`);
+        }
     });
     
     // Upload file
@@ -166,14 +205,14 @@ document.addEventListener('DOMContentLoaded', function() {
         progressText.textContent = 'Preparing upload...';
         
         // Get redaction options
-        const redactionMethod = document.querySelector('input[name="redaction-method"]:checked').value;
         const beepVolume = parseFloat(beepVolumeSlider.value) / 100; // Convert percentage to decimal (0.0-1.0)
         const audioVolume = parseFloat(audioVolumeSlider.value) / 100; // Convert percentage to decimal
+        
+        console.log(`Sending audio processing request with: beepVolume=${beepVolume}, audioVolume=${audioVolume}`);
         
         // Create form data
         const formData = new FormData();
         formData.append('audio', selectedFile);
-        formData.append('redactionMethod', redactionMethod);
         formData.append('beepVolume', beepVolume);
         formData.append('audioVolume', audioVolume);
         
@@ -210,11 +249,6 @@ document.addEventListener('DOMContentLoaded', function() {
                             
                             // Refresh recordings list
                             fetchRecordings();
-                            
-                            // Show logs after successful upload
-                            fetchLogs();
-                            logsCard.classList.remove('hidden');
-                            logsCard.scrollIntoView({ behavior: 'smooth' });
                         }, 1000);
                     } catch (parseError) {
                         console.error('Error parsing response:', parseError);
@@ -257,10 +291,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         alert(`Error: ${errorMessage}`);
                     }
                     
-                    // Show logs after error to help with debugging
-                    fetchLogs();
-                    logsCard.classList.remove('hidden');
-                    logsCard.scrollIntoView({ behavior: 'smooth' });
+                    // Error handling in production mode
                     
                     setTimeout(() => {
                         uploadProgress.classList.add('hidden');
@@ -406,142 +437,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Log viewer functionality
-    const logsCard = document.getElementById('logs-card');
-    const logsContainer = document.getElementById('logs-container');
-    const logFilter = document.getElementById('log-filter');
-    const refreshLogsBtn = document.getElementById('refresh-logs');
-    const clearLogsBtn = document.getElementById('clear-logs');
-
-    // Function to fetch logs
-    function fetchLogs() {
-        fetch('/api/logs')
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`Server returned ${response.status}: ${response.statusText}`);
-                }
-                return response.json();
-            })
-            .then(logs => {
-                if (logs && logs.length > 0) {
-                    logsCard.classList.remove('hidden');
-                    displayLogs(logs);
-                } else {
-                    // Still show the logs card, but with a message
-                    logsCard.classList.remove('hidden');
-                    logsContainer.innerHTML = '<div class="empty-logs">No logs available</div>';
-                }
-            })
-            .catch(error => {
-                console.error('Error fetching logs:', error);
-                logsContainer.innerHTML = `<div class="error-logs">Error loading logs: ${error.message}</div>`;
-            });
-    }
-
-    // Function to display logs
-    function displayLogs(logs) {
-        // Clear existing logs
-        logsContainer.innerHTML = '';
-        
-        // Filter logs if needed
-        const filterValue = logFilter.value;
-        const filteredLogs = filterValue === 'all' 
-            ? logs 
-            : logs.filter(log => log.category === filterValue);
-        
-        // Display logs in reverse chronological order (newest first)
-        filteredLogs.reverse().forEach(log => {
-            const logEntry = document.createElement('div');
-            logEntry.className = 'log-entry';
-            
-            // Format timestamp for display
-            const timestamp = new Date(log.timestamp);
-            const formattedTime = timestamp.toLocaleTimeString();
-            
-            // Create log header with timestamp, level, and category
-            const logHeader = document.createElement('div');
-            logHeader.className = 'log-header';
-            logHeader.innerHTML = `
-                <span class="log-timestamp">${formattedTime}</span>
-                <div>
-                    <span class="log-level log-level-${log.level}">${log.level.toUpperCase()}</span>
-                    <span class="log-category">${log.category}</span>
-                </div>
-            `;
-            
-            // Create log message
-            const logMessage = document.createElement('div');
-            logMessage.className = 'log-message';
-            logMessage.textContent = log.message;
-            
-            // Add elements to log entry
-            logEntry.appendChild(logHeader);
-            logEntry.appendChild(logMessage);
-            
-            // Add details if available
-            if (log.details) {
-                // Create a toggle for details
-                const detailsToggle = document.createElement('div');
-                detailsToggle.className = 'log-details-toggle';
-                detailsToggle.textContent = 'Show details';
-                
-                // Create details container (hidden by default)
-                const detailsContainer = document.createElement('div');
-                detailsContainer.className = 'log-details hidden';
-                detailsContainer.textContent = JSON.stringify(log.details, null, 2);
-                
-                // Add toggle functionality
-                detailsToggle.addEventListener('click', () => {
-                    if (detailsContainer.classList.contains('hidden')) {
-                        detailsContainer.classList.remove('hidden');
-                        detailsToggle.textContent = 'Hide details';
-                    } else {
-                        detailsContainer.classList.add('hidden');
-                        detailsToggle.textContent = 'Show details';
-                    }
-                });
-                
-                logEntry.appendChild(detailsToggle);
-                logEntry.appendChild(detailsContainer);
-            }
-            
-            logsContainer.appendChild(logEntry);
-        });
-        
-        // Show message if no logs match the filter
-        if (filteredLogs.length === 0) {
-            logsContainer.innerHTML = `<div class="empty-logs">No logs matching filter: ${filterValue}</div>`;
-        }
-    }
-
-    // Event listeners for log controls
-    logFilter.addEventListener('change', () => {
-        fetchLogs(); // Re-fetch and filter logs
-    });
-
-    refreshLogsBtn.addEventListener('click', fetchLogs);
-
-    clearLogsBtn.addEventListener('click', () => {
-        fetch('/api/logs/clear', { method: 'POST' })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`Server returned ${response.status}: ${response.statusText}`);
-                }
-                return response.json();
-            })
-            .then(() => {
-                logsContainer.innerHTML = '<div class="empty-logs">Logs cleared</div>';
-            })
-            .catch(error => {
-                console.error('Error clearing logs:', error);
-                alert(`Error clearing logs: ${error.message}`);
-            });
-    });
-
-    // Initial fetch of recordings and logs
+    // Initial fetch of recordings
     fetchRecordings();
-    fetchLogs();
-    
-    // Refresh logs only when manually requested to avoid log clutter
-    // No automatic polling - user must click the Refresh button to see new logs
 });
