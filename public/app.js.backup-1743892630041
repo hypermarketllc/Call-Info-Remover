@@ -277,8 +277,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     clearBtn.click();
                     uploadProgress.classList.add('hidden');
                     
-                    // No need to refresh recordings list here as it's already updated for each file
-                    // that was successfully processed
+                    // Refresh recordings list
+                    fetchRecordings();
                     
                     // Show summary
                     if (errorCount > 0) {
@@ -423,9 +423,6 @@ document.addEventListener('DOMContentLoaded', function() {
                                 successCount++;
                                 console.log(`File ${fileIndex + 1} processed successfully:`, data.result);
                                 
-                                // Update the recordings list immediately when a file is processed
-                                fetchRecordings();
-                                
                                 // Process next file
                                 currentFileIndex++;
                                 processNextFile();
@@ -475,7 +472,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Fetch and display recordings
     function fetchRecordings() {
-        console.log('Fetching recordings list...');
         fetch('/api/calls')
             .then(response => {
                 if (!response.ok) {
@@ -484,7 +480,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 return response.json();
             })
             .then(recordings => {
-                console.log(`Received ${recordings ? recordings.length : 0} recordings`);
                 if (recordings && recordings.length > 0) {
                     recordingsCard.classList.remove('hidden');
                     displayRecordings(recordings);

@@ -1,126 +1,90 @@
 /**
- * Simple Fix Script for Call Info Remover Download Issue
+ * Simple Fix Script for Call Info Remover
  * 
- * This script fixes the download endpoint issue by modifying the server.js file
- * to properly retrieve redacted audio data from the database.
+ * This script modifies the app.js file to show processed recordings as soon as they're ready,
+ * without waiting for all files in a batch to be processed.
+ * 
+ * Usage: node simple-fix.js
  */
 
 const fs = require('fs');
 const path = require('path');
 
-console.log('=== CALL INFO REMOVER SIMPLE FIX ===');
+// Path to the app.js file
+const appJsPath = path.join(__dirname, 'public', 'app.js');
 
-// Fix the download endpoints in server.js
-console.log('\nFixing download endpoints in server.js...');
+// Create a backup of the original file
+const backupPath = path.join(__dirname, 'public', `app.js.backup-${Date.now()}`);
+
 try {
-  const serverJsPath = path.join(__dirname, 'server.js');
-  const serverJs = fs.readFileSync(serverJsPath, 'utf8');
+  console.log('Reading app.js file...');
+  const appJs = fs.readFileSync(appJsPath, 'utf8');
   
-  // Create a backup of the original file
-  const backupPath = path.join(__dirname, 'server.js.backup-' + Date.now());
-  console.log(`Creating backup at ${backupPath}`);
-  fs.writeFileSync(backupPath, serverJs);
+  console.log('Creating backup of original file...');
+  fs.writeFileSync(backupPath, appJs);
   
-  // The original redacted audio endpoint
-  const originalRedactedAudioEndpoint = `// Download redacted audio
-app.get('/api/download/redacted/:id', async (req, res) => {
-  addLog(LOG_LEVELS.INFO, 'api', \`=== API REQUEST: DOWNLOAD REDACTED AUDIO (ID: \${req.params.id}) ===\`);
+  console.log('Applying fixes...');
   
-  try {
-    const recording = await db.getRecordingById(req.params.id);
-    
-    if (recording && recording.redacted_audio_data) {
-      addLog(LOG_LEVELS.INFO, 'api', \`Sending redacted audio file: \${recording.original_filename}\`);
-      
-      res.set('Content-Type', recording.redacted_content_type || 'audio/mpeg');
-      res.set('Content-Disposition', \`attachment; filename="redacted_\${recording.original_filename}"\`);
-      res.send(recording.redacted_audio_data);
-    } else {
-      addLog(LOG_LEVELS.WARNING, 'api', \`Redacted audio not found for ID: \${req.params.id}\`);
-      res.status(404).json({ error: 'Redacted audio not found' });
-    }
-  } catch (error) {
-    addLog(LOG_LEVELS.ERROR, 'api', 'Error retrieving redacted audio', {
-      error: error.message,
-      stack: error.stack
-    });
-    
-    res.status(500).json({ error: 'Error retrieving redacted audio' });
-  }
-});`;
-
-  // The fixed redacted audio endpoint
-  const fixedRedactedAudioEndpoint = `// Download redacted audio
-app.get('/api/download/redacted/:id', async (req, res) => {
-  addLog(LOG_LEVELS.INFO, 'api', \`=== API REQUEST: DOWNLOAD REDACTED AUDIO (ID: \${req.params.id}) ===\`);
+  // Fix 1: Update pollJobStatus function to refresh recordings list after each file is processed
+  let modifiedAppJs = appJs.replace(
+    /if\s*\(data\.status\s*===\s*'completed'\)\s*\{\s*\/\/\s*Processing\s*complete\s*clearInterval\s*\(\s*pollInterval\s*\)\s*;\s*successCount\+\+\s*;\s*console\.log\s*\(\s*`File\s*\$\{\s*fileIndex\s*\+\s*1\s*\}\s*processed\s*successfully:\s*`,\s*data\.result\s*\)\s*;\s*\/\/\s*Process\s*next\s*file\s*currentFileIndex\+\+\s*;\s*processNextFile\s*\(\s*\)\s*;\s*\}/g,
+    `if (data.status === 'completed') {
+                                // Processing complete
+                                clearInterval(pollInterval);
+                                successCount++;
+                                console.log(\`File \${fileIndex + 1} processed successfully:\`, data.result);
+                                
+                                // Update the recordings list immediately when a file is processed
+                                fetchRecordings();
+                                
+                                // Process next file
+                                currentFileIndex++;
+                                processNextFile();
+                            }`
+  );
   
-  try {
-    // First get the recording metadata
-    const recording = await db.getRecordingById(req.params.id);
-    
-    if (!recording) {
-      addLog(LOG_LEVELS.WARNING, 'api', \`Recording not found for ID: \${req.params.id}\`);
-      return res.status(404).json({ error: 'Recording not found' });
-    }
-    
-    // Then get the redacted audio data
-    const redactedAudio = await db.getRedactedAudio(req.params.id);
-    
-    if (!redactedAudio) {
-      addLog(LOG_LEVELS.WARNING, 'api', \`Redacted audio not found for ID: \${req.params.id}\`);
-      return res.status(404).json({ error: 'Redacted audio not found' });
-    }
-    
-    // Convert base64 to buffer if needed
-    let audioBuffer;
-    try {
-      if (typeof redactedAudio.data === 'string') {
-        audioBuffer = Buffer.from(redactedAudio.data, 'base64');
-      } else {
-        audioBuffer = redactedAudio.data;
-      }
-    } catch (conversionError) {
-      addLog(LOG_LEVELS.ERROR, 'api', \`Error converting audio data to buffer\`, {
-        error: conversionError.message,
-        stack: conversionError.stack
-      });
-      return res.status(500).json({ error: 'Error processing audio data' });
-    }
-    
-    addLog(LOG_LEVELS.INFO, 'api', \`Sending redacted audio file: \${recording.original_filename}\`);
-    
-    // Send the file
-    res.set('Content-Type', redactedAudio.content_type || 'audio/mpeg');
-    res.set('Content-Disposition', \`attachment; filename="redacted_\${recording.original_filename}"\`);
-    res.set('Content-Length', audioBuffer.length);
-    res.send(audioBuffer);
-  } catch (error) {
-    addLog(LOG_LEVELS.ERROR, 'api', 'Error retrieving redacted audio', {
-      error: error.message,
-      stack: error.stack
-    });
-    
-    res.status(500).json({ error: 'Error retrieving redacted audio' });
-  }
-});`;
-
-  // Replace the redacted audio endpoint
-  let updatedServerJs = serverJs;
-  if (serverJs.includes(originalRedactedAudioEndpoint)) {
-    updatedServerJs = serverJs.replace(originalRedactedAudioEndpoint, fixedRedactedAudioEndpoint);
-    console.log('Fixed redacted audio download endpoint');
-  } else {
-    console.log('Original redacted audio endpoint not found. The server.js file might have a different format.');
-    console.log('Please check the server.js file manually and update the download endpoint.');
-  }
-
-  // Write the updated server.js file
-  fs.writeFileSync(serverJsPath, updatedServerJs);
-  console.log('Download endpoint fixed successfully');
+  // Fix 2: Remove redundant fetchRecordings call at the end of batch processing
+  modifiedAppJs = modifiedAppJs.replace(
+    /setTimeout\s*\(\s*\(\s*\)\s*=>\s*\{\s*\/\/\s*Reset\s*form\s*clearBtn\.click\s*\(\s*\)\s*;\s*uploadProgress\.classList\.add\s*\(\s*'hidden'\s*\)\s*;\s*\/\/\s*Refresh\s*recordings\s*list\s*fetchRecordings\s*\(\s*\)\s*;/g,
+    `setTimeout(() => {
+                    // Reset form
+                    clearBtn.click();
+                    uploadProgress.classList.add('hidden');
+                    
+                    // No need to refresh recordings list here as it's already updated for each file
+                    // that was successfully processed`
+  );
   
-  console.log('\n=== FIX COMPLETE ===');
-  console.log('Please restart your server with: pm2 restart call-info-remover');
-  console.log('Then verify that the fix worked by uploading and downloading a new audio file.');
+  // Fix 3: Enhance fetchRecordings function with better logging
+  modifiedAppJs = modifiedAppJs.replace(
+    /function\s*fetchRecordings\s*\(\s*\)\s*\{\s*fetch\s*\(\s*'\/api\/calls'\s*\)/g,
+    `function fetchRecordings() {
+        console.log('Fetching recordings list...');
+        fetch('/api/calls')`
+  );
+  
+  modifiedAppJs = modifiedAppJs.replace(
+    /\.then\s*\(\s*recordings\s*=>\s*\{\s*if\s*\(\s*recordings\s*&&\s*recordings\.length\s*>\s*0\s*\)\s*\{/g,
+    `.then(recordings => {
+                console.log(\`Received \${recordings ? recordings.length : 0} recordings\`);
+                if (recordings && recordings.length > 0) {`
+  );
+  
+  // Write the modified file
+  console.log('Writing modified app.js file...');
+  fs.writeFileSync(appJsPath, modifiedAppJs);
+  
+  console.log('\n✅ Fix applied successfully!');
+  console.log(`Original file backed up at: ${backupPath}`);
+  console.log('\nChanges made:');
+  console.log('1. Modified pollJobStatus function to update recordings list as soon as each file is processed');
+  console.log('2. Removed redundant fetchRecordings call at the end of batch processing');
+  console.log('3. Enhanced fetchRecordings function with better logging');
+  console.log('\nNow each processed file will appear in the recordings list immediately after processing,');
+  console.log('without waiting for all files in the batch to be processed.');
+  console.log('\nPlease restart your server to apply the changes.');
+  
 } catch (error) {
-  console.error('Error fixing download endpoint:', error);
+  console.error('❌ Error applying fix:', error.message);
+  console.error('Please check that the app.js file exists in the public directory and is accessible.');
 }
