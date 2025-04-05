@@ -226,10 +226,14 @@ fi
 
 # Clone the repository
 print_message "Cloning from $REPO_URL..."
-git clone $REPO_URL .
+git clone $REPO_URL $APP_DIR
 if [ $? -ne 0 ]; then
-  print_error "Failed to clone repository"
-  exit 1
+  print_error "Failed to clone repository. Trying alternative approach..."
+  cd $APP_DIR
+  git init
+  git remote add origin $REPO_URL
+  git fetch
+  git checkout -f origin/main
 fi
 print_success "Repository cloned successfully"
 
