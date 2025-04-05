@@ -215,7 +215,6 @@ print_success "Directory structure created with correct permissions"
 
 # Step 9: Clone the repository
 print_message "Step 9: Cloning the repository..."
-cd $APP_DIR
 
 # Check if the directory is not empty
 if [ "$(ls -A $APP_DIR)" ]; then
@@ -226,10 +225,10 @@ fi
 
 # Clone the repository
 print_message "Cloning from $REPO_URL..."
-git clone $REPO_URL $APP_DIR
+cd $APP_DIR
+git clone $REPO_URL .
 if [ $? -ne 0 ]; then
   print_error "Failed to clone repository. Trying alternative approach..."
-  cd $APP_DIR
   git init
   git remote add origin $REPO_URL
   git fetch
